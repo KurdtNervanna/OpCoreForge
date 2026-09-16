@@ -1,0 +1,8 @@
+source: https://github.com/USBToolBox/tool.git
+commit: 0c6823a2c643a4488888938451194723dc9ae29a
+
+This directory is a mechanically rewritten copy of the upstream project.
+The ONLY edits are package/module renames (see build/vendor.py) needed so
+all three upstream projects -- which each ship a top-level package called
+'Scripts' -- can be imported into one process. All behavioural changes are
+applied at runtime by opcoreforge/patches.py; nothing here is hand-edited.

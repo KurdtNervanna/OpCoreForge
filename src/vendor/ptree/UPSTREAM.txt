@@ -1,0 +1,8 @@
+source: https://github.com/corpnewt/ProperTree.git
+commit: 51ed53dbe3c96a81686ae1fc47f6d2a92f668159
+
+This directory is a mechanically rewritten copy of the upstream project.
+The ONLY edits are package/module renames (see build/vendor.py) needed so
+all three upstream projects -- which each ship a top-level package called
+'Scripts' -- can be imported into one process. All behavioural changes are
+applied at runtime by opcoreforge/patches.py; nothing here is hand-edited.

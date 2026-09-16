@@ -70,6 +70,14 @@ datas += tree(VENDOR / "utb" / "resources", "resources")
 if (VENDOR / "utb" / "utb_windows.py").exists():
     datas.append((str(VENDOR / "utb" / "utb_windows.py"), "."))
 
+# The application icon. The .ico is embedded in the executable below as well,
+# but the window needs a file it can point Tk at, and on anything but Windows
+# Tk cannot read an .ico at all -- hence the PNG beside it.
+for _icon in (SPEC_DIR / "build" / "OpCoreForge.ico",
+              SPEC_DIR / "assets" / "OpCoreForge-256.png"):
+    if _icon.exists():
+        datas.append((str(_icon), "."))
+
 # Bundled OpenCore/kext payload (optional -- build/make_seed.py creates it).
 seed = SRC / "seed"
 if (seed / "payload.zip").exists():

@@ -4,6 +4,13 @@ Every delivered build gets its own version, so you can always tell which one
 you are running: it is in the title bar, in `OpCoreForge.exe --version`, at the
 top of `--self-test`, and in the release zip's filename.
 
+## 1.2.5 - 2026-09-16
+
+- Application icon: assets/OpCoreForge.png, generated into build/OpCoreForge.ico at seven sizes by build/make_icon.py and embedded in the executable. The window uses the .ico on Windows and a 256px PNG elsewhere, since Tk cannot read an .ico off Windows
+- Fixed the release archive silently dropping build/OpCoreForge.ico. The exclusion for PyInstaller's scratch directory was the prefix "build/OpCoreForge" with no trailing slash, so it matched the icon file as well as the folder - the icon was found by the first release that had one
+- The archive now also carries LICENSE, THIRD-PARTY-NOTICES.md, .gitignore and assets/, which were not in its include list
+- Licensing settled: BSD 3-Clause for the integration code, matching OpCore-Simplify and ProperTree, with USBToolBox's MIT terms compatible and adding nothing. THIRD-PARTY-NOTICES.md records what is redistributed, under which licence and from which upstream commit, and what is downloaded at run time rather than shipped
+
 ## 1.2.4 - 2026-09-16
 
 - Building an ISO now asks where to save it. It used to write OpCoreForge-macOS.iso into the data folder without a dialog and without saying so, which from the outside is indistinguishable from the button doing nothing at all

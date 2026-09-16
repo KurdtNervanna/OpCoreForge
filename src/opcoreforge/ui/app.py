@@ -127,11 +127,46 @@ class App:
 
     # -- layout ----------------------------------------------------------
 
+    def _set_window_icon(self):
+        """Put the application icon on the window.
+
+        Two routes, because neither works everywhere. Windows takes the .ico
+        the executable already embeds, which is what the title bar and taskbar
+        want; everywhere else Tk reads the PNG directly. Both are optional --
+        a missing icon is a cosmetic loss, never a reason not to start.
+        """
+        def find(name):
+            # Bundled beside the code when frozen; in the checkout it is in
+            # assets/ (the PNG) or build/ (the .ico the executable embeds).
+            root = paths_module.app_dir()
+            for candidate in (self.paths.resource(name),
+                              root / "assets" / name,
+                              root / "build" / name):
+                if candidate.exists():
+                    return candidate
+            return None
+
+        try:
+            if os.name == "nt":
+                ico = find("OpCoreForge.ico")
+                if ico:
+                    self.root.iconbitmap(default=str(ico))
+                    return
+            png = find("OpCoreForge-256.png")
+            if png:
+                # Held on the instance: Tk keeps no reference of its own and
+                # the image would be collected out from under the window.
+                self._icon_image = tk.PhotoImage(file=str(png))
+                self.root.iconphoto(True, self._icon_image)
+        except Exception:
+            pass
+
     def _build_ui(self):
         self.root.title("%s %s" % (APP_TITLE, VERSION))
         self.root.geometry("1280x820")
         self.root.minsize(1060, 680)
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
+        self._set_window_icon()
         theme.set_windows_titlebar(self.root)
 
         top = ttk.Frame(self.root, style="App.TFrame", padding=(18, 14, 18, 0))

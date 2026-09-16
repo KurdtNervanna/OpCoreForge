@@ -44,6 +44,13 @@ It checks that all three projects load side by side, that every data file each
 of them reads at runtime is in the bundle, that the data folder is writable and
 that the config.plist editor still embeds. Anything missing is named.
 
+The icon is `assets/OpCoreForge.png`; `build/OpCoreForge.ico` is generated from
+it by `python build/make_icon.py` at seven sizes and is committed, because the
+Windows machine that runs `BUILD_EXE.bat` has no Pillow and an executable
+missing its icon over a build dependency is a silly way to lose it. The window
+uses the `.ico` on Windows and the PNG everywhere else, since Tk cannot read an
+`.ico` off Windows.
+
 ---
 
 ## Using it
@@ -450,6 +457,13 @@ All the real work belongs to the upstream authors. OpCoreForge is integration
 code around them, and each project keeps its own licence in
 `src/vendor/*/LICENSE`.
 
-- [OpCore-Simplify](https://github.com/lzhoang2801/OpCore-Simplify) — lzhoang2801
-- [USBToolBox/tool](https://github.com/USBToolBox/tool) — dhinakg
-- [ProperTree](https://github.com/corpnewt/ProperTree) — CorpNewt
+- [OpCore-Simplify](https://github.com/lzhoang2801/OpCore-Simplify) — lzhoang2801 — BSD 3-Clause
+- [USBToolBox/tool](https://github.com/USBToolBox/tool) — dhinakg — MIT
+- [ProperTree](https://github.com/corpnewt/ProperTree) — CorpNewt — BSD 3-Clause
+
+OpCoreForge's own code — everything outside `src/vendor/` — is BSD 3-Clause;
+see `LICENSE`. The same licence as two of the three upstreams, so the tree
+reads under one set of conditions rather than a patchwork, and the MIT tree is
+compatible with it. `THIRD-PARTY-NOTICES.md` has the whole picture: what is
+redistributed, under which licence, from which commit, and what is downloaded
+at run time instead of shipped.

@@ -24,11 +24,15 @@ ROOT = Path(__file__).resolve().parent.parent
 INCLUDE = [
     "README.md",
     "CHANGELOG.md",
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md",
     "BUILD_EXE.bat",
     "OpCoreForge.spec",
+    ".gitignore",
     "src",
     "build",
     "tools",
+    "assets",
     "_fixture",
 ]
 
@@ -40,8 +44,10 @@ SKIP_NAMES = {".DS_Store"}
 
 # PyInstaller's scratch directory sits inside build/ and is tens of megabytes
 # of this machine's intermediate state. Excluded by path rather than by name,
-# because "OpCoreForge" is not a name to blanket-exclude.
-SKIP_PREFIXES = ("build/OpCoreForge", "build/file_version_info.txt")
+# because "OpCoreForge" is not a name to blanket-exclude -- and the trailing
+# slash matters: without it this also swallowed build/OpCoreForge.ico, and the
+# icon went missing from the release without a word.
+SKIP_PREFIXES = ("build/OpCoreForge/", "build/file_version_info.txt")
 
 
 def version() -> str:

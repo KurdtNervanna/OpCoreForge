@@ -4,6 +4,10 @@ Every delivered build gets its own version, so you can always tell which one
 you are running: it is in the title bar, in `OpCoreForge.exe --version`, at the
 top of `--self-test`, and in the release zip's filename.
 
+## 1.2.6 - 2026-09-16
+
+- README: screenshots of the running application, captured by the GUI suite against the synthetic hardware fixture and published by tools/make_shots.py, plus the icon in the header. The release archive now carries docs/ as well
+
 ## 1.2.5 - 2026-09-16
 
 - Application icon: assets/OpCoreForge.png, generated into build/OpCoreForge.ico at seven sizes by build/make_icon.py and embedded in the executable. The window uses the .ico on Windows and a 256px PNG elsewhere, since Tk cannot read an .ico off Windows

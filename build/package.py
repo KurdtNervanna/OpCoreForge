@@ -33,6 +33,7 @@ INCLUDE = [
     "build",
     "tools",
     "assets",
+    "docs",
     "_fixture",
 ]
 

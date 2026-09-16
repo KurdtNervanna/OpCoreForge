@@ -1,3 +1,5 @@
+<img src="assets/OpCoreForge-256.png" width="120" align="right" alt="">
+
 # OpCoreForge
 
 OpCore-Simplify, USBToolBox and ProperTree combined into one portable Windows
@@ -17,6 +19,49 @@ OpCore-Simplify ends by telling you to go and do the other two by hand:
 
 OpCoreForge turns that closing instruction into stages 7 and 8 of the same
 program, and does the file shuffling itself.
+
+---
+
+## What it looks like
+
+Ten tabs, left to right, each unlocking the next. A stage that is finished gets
+a tick, and the status bar says what just happened and how long it took rather
+than going back to "Ready".
+
+![Choosing the macOS release](docs/screenshots/01-macos-version.png)
+
+Every release the hardware can run, with the ones needing OpenCore Legacy
+Patcher flagged — the choice everything downstream depends on.
+
+![Kernel extensions](docs/screenshots/04-kexts.png)
+
+All 88 kexts by category with upstream's own status markers. Toggling a row
+runs OpCore-Simplify's dependency rules, so selecting a plugin pulls in what it
+needs and mutually exclusive drivers turn each other off.
+
+![ACPI patches](docs/screenshots/03-acpi-patches.png)
+
+The 26 ACPI patches with the recommended set already chosen, and
+[the SMBIOS shortlist](docs/screenshots/02-smbios.png) behind a toggle that
+opens the full 77-model catalogue.
+
+![Building the EFI](docs/screenshots/05-build-efi.png)
+
+What is about to be built, and what the target machine's firmware needs changed
+before it will boot.
+
+![A question from inside OpCore-Simplify](docs/screenshots/06-inline-prompt.png)
+
+Upstream asks questions from inside its own code, at a terminal that is not
+there any more. Every one of them is surfaced as a dialog instead of being
+answered silently — which is the difference between a tool that makes your
+choices and one that asks.
+
+These are captured from the running application by `tools/test_gui.py`, which
+drives it against the synthetic hardware report `tools/make_fixture.py`
+produces — a Comet Lake i9-10900K that does not exist — and published by
+`tools/make_shots.py`, which only crops them to the window. Nothing is mocked
+up or retouched: it is the real window rendering real data.
 
 ---
 

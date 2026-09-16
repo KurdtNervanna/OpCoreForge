@@ -11,7 +11,7 @@ self-test output. Use build/bump_version.py rather than editing by hand -- it
 keeps CHANGELOG.md in step.
 """
 
-__version__ = "1.2.5"
+__version__ = "1.2.6"
 
 # The day this version was cut. Used as a floor for the system clock: a PC
 # cannot legitimately be running a build from the future, so a date earlier

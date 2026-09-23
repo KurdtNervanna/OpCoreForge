@@ -6,6 +6,14 @@ OpCore-Simplify, USBToolBox and ProperTree combined into one portable Windows
 executable, driven by a GUI that runs them in the order they actually have to
 run in.
 
+> **Windows only.** OpCoreForge runs on **Windows** and nowhere else. It
+> is the *preparation* step for installing macOS on hardware Apple does not
+> support: you run it on a Windows PC — ideally the target machine itself, so
+> it can read that machine's hardware and USB ports — to build the OpenCore EFI
+> and the macOS install media. macOS itself is then installed by booting the
+> target machine from that media. It is not a macOS or Linux application, and
+> it does nothing on a machine that already runs macOS.
+
 Each of the three does one part of building a working OpenCore EFI, and
 OpCore-Simplify ends by telling you to go and do the other two by hand:
 
@@ -478,11 +486,14 @@ failure that takes the application down before a dialog can be read.
   OpCoreForge marks those rows and refuses them, naming the GPU and the newest
   release it can display; chosen anyway, upstream disables every GPU and the
   next step dies reading an empty list.
-- **Stages 1 and 7 need Windows.** Hardware Sniffer is a Windows binary, and USB
-  port discovery reads live PnP data through WMI. The rest is cross-platform,
-  which is what makes the test suite possible. Off Windows, stage 1 accepts an
-  imported `Report.json` and stage 7 accepts a `usb.json` captured on the target
-  machine.
+- **Windows is the only supported platform.** Hardware Sniffer is a Windows
+  binary, USB port discovery reads live PnP data through WMI, the ACPI dump
+  needs an elevated Windows process, and the USB writer uses `diskpart`. Much
+  of the Python underneath happens to be cross-platform — which is what lets
+  the test suite run under `xvfb-run` on Linux — but that is a development
+  convenience, not a way to use OpCoreForge. Run it on Windows, preferably on
+  the machine macOS is going onto; if that is not possible, stage 1 can import
+  a `Report.json` and stage 7 a `usb.json` captured on the target machine.
 - **The bundled payload is a starting point, not a pin.** After unpacking it
   once, OpCore-Simplify's own update logic takes over unchanged — release ids
   compared against `history.json`, SHA-256 verified, anything stale

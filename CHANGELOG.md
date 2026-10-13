@@ -4,6 +4,10 @@ Every delivered build gets its own version, so you can always tell which one
 you are running: it is in the title bar, in `OpCoreForge.exe --version`, at the
 top of `--self-test`, and in the release zip's filename.
 
+## 1.3.2 - 2026-10-13
+
+- Recognise NVIDIA Turing+ by PCI device id, and stop showing the dead-end text for cards the NullMoth driver supports. Real Hardware Sniffer reports often give an NVIDIA Codename of 'Unknown' (as on a GTX 1660 Ti), so matching on codename alone missed the card and the offer never appeared - the user saw upstream's blunt 'You cannot install macOS without a supported GPU / do NOT spam my inbox' instead. Detection now keys on vendor 10DE with device id >= 0x1E00 (Turing and newer, no gaps), falling back to the codename only when the id will not parse. The compatibility step now runs upstream's GPU check silently and reprints a clean verdict, so a supported NVIDIA card shows its macOS Sequoia (NullMoth driver) line and the scare text never reaches the screen; declining prints a plain stop instead.
+
 ## 1.3.1 - 2026-10-13
 
 - Fix startup failure 'Could not get latest iasl for Windows'. OpCore-Simplify's DSDT.get_latest_iasl inspects only acpica's latest GitHub release, but acpica now cuts source-only releases with no Windows binary (20260930 ships just the Unix iasl), so the ACPI compiler could be neither bundled by make_seed nor downloaded on first run - a hard startup crash. patches.py now walks the acpica releases newest-to-oldest and picks the first iasl-win-*.zip (currently 20260408), falling back to upstream's method; applied in apply_all so both the seed build and the executable's first run are covered. No vendored source edited.

@@ -14,6 +14,7 @@ Covers:
   * a machine with another supported GPU never stops and never engages.
 """
 
+import io
 import sys
 from pathlib import Path
 
@@ -41,8 +42,10 @@ def turing_only_report():
                 "SIMD Features": "SSE, SSE2, AVX, AVX2"},
         "Motherboard": {"Platform": "Desktop"},
         "GPU": {
+            # Codename "Unknown" is what a real Hardware Sniffer report carries
+            # for this card -- the device id is what identifies it as Turing.
             "NVIDIA GeForce GTX 1660 Ti": {
-                "Manufacturer": "NVIDIA", "Codename": "Turing",
+                "Manufacturer": "NVIDIA", "Codename": "Unknown",
                 "Device ID": "10DE-2182", "Device Type": "Discrete GPU"},
         },
         "Monitor": {
@@ -116,22 +119,48 @@ def main():
     check("targets_sequoia(24.x)", nvidia.targets_sequoia("24.5.0"), True)
     check("targets_sequoia(25.x)", nvidia.targets_sequoia("25.0.0"), False)
 
+    # -- device-id detection (codename "Unknown" is common in real reports) --
+    def gpu(vendor_dev, codename="Unknown", mfr="NVIDIA"):
+        return {"Manufacturer": mfr, "Codename": codename, "Device ID": vendor_dev}
+    check("Turing by id (1660 Ti, Unknown codename)",
+          nvidia.is_turing_or_newer(gpu("10DE-2182")), True)
+    check("Ada by id (RTX 4090)", nvidia.is_turing_or_newer(gpu("10DE-2684")), True)
+    check("Blackwell by id (RTX 5090)", nvidia.is_turing_or_newer(gpu("10DE-2B85")), True)
+    check("Pascal by id (GTX 1060) rejected",
+          nvidia.is_turing_or_newer(gpu("10DE-1C03")), False)
+    check("Maxwell by id (GTX 970) rejected",
+          nvidia.is_turing_or_newer(gpu("10DE-13C2")), False)
+    check("AMD rejected", nvidia.is_turing_or_newer(gpu("1002-73FF", mfr="AMD")), False)
+    check("codename fallback when id unparseable",
+          nvidia.is_turing_or_newer(gpu("10DE-XXXX", codename="Ampere")), True)
+
     # -- checker: decline keeps the hard stop --------------------------------
+    import contextlib
     nvidia.reset()
-    stopped, _ = run_checker(turing_only_report(), "no")
+    declined = io.StringIO()
+    with contextlib.redirect_stdout(declined):
+        stopped, _ = run_checker(turing_only_report(), "no")
     check("decline -> upstream stop", stopped, True)
     check("decline -> not engaged", nvidia.engaged(), False)
+    check("decline -> no 'spam my inbox' text", "spam" not in declined.getvalue(), True)
 
-    # -- checker: accept reclassifies to Sequoia -----------------------------
+    # -- checker: accept reclassifies to Sequoia, output is clean ------------
     nvidia.reset()
     report = turing_only_report()
-    stopped, checker = run_checker(report, "yes")
+    accepted = io.StringIO()
+    with contextlib.redirect_stdout(accepted):
+        stopped, checker = run_checker(report, "yes")
+    out = accepted.getvalue()
     check("accept -> no stop", stopped, False)
     check("accept -> engaged", nvidia.engaged(), True)
     card = report["GPU"]["NVIDIA GeForce GTX 1660 Ti"]
     check("accept -> card reclassified to Sequoia", card.get("Compatibility"), nvidia.COMPATIBILITY)
     check("accept -> native max pinned to Sequoia", checker.max_native_macos_version, "24.99.99")
     check("accept -> native min pinned to Sequoia", checker.min_native_macos_version, "24.0.0")
+    check("accept -> output names the driver", "NullMoth NVIDIA driver enabled" in out, True)
+    check("accept -> no 'Unsupported' shown for the card",
+          "Unsupported" not in out, True)
+    check("accept -> no 'cannot install' text", "cannot install" not in out, True)
 
     # -- another supported GPU: never stops, never engages -------------------
     nvidia.reset()

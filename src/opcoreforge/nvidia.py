@@ -45,6 +45,42 @@ TARGET_NAME = "macOS Sequoia 15"
 # families the checker already treats as (web-driver) supported.
 SUPPORTED_CODENAMES = ("turing", "ampere", "ada", "blackwell")
 
+# Hardware Sniffer often reports an NVIDIA "Codename" of "Unknown" (as on a real
+# GTX 1660 Ti), so codename alone is not enough. The PCI device id is: NVIDIA's
+# vendor is 10DE and every Turing-or-newer die is id 0x1E00 or above, while the
+# newest pre-Turing parts (Pascal tops out near 0x1D13, Volta at 0x1DBx) stay
+# below it. So vendor 10DE with id >= 0x1E00 is "Turing or newer" with no gaps.
+NVIDIA_VENDOR = "10de"
+TURING_MIN_DEVICE_ID = 0x1E00
+
+
+def _device_id(props):
+    """(vendor, device) from a "VVVV-DDDD" id string; ints where parseable."""
+    raw = props.get("Device ID") or ""
+    parts = raw.split("-")
+    if len(parts) != 2:
+        return None, None
+    vendor = parts[0].strip().lower()
+    try:
+        device = int(parts[1], 16)
+    except ValueError:
+        device = None
+    return vendor, device
+
+
+def is_turing_or_newer(props) -> bool:
+    """True for an NVIDIA GPU the NullMoth driver supports (Turing+).
+
+    Decided from the PCI device id, which is reliable even when the codename is
+    "Unknown"; falls back to the codename for the rare id we cannot parse.
+    """
+    if props.get("Manufacturer") != "NVIDIA":
+        return False
+    vendor, device = _device_id(props)
+    if vendor == NVIDIA_VENDOR and device is not None:
+        return device >= TURING_MIN_DEVICE_ID
+    return is_supported_codename(props.get("Codename"))
+
 # --- exact OpenCore values (driver README) ---------------------------------
 NVRAM_GUID = "7C436110-AB2A-4BBB-A880-FE41995C9F82"
 # <430A0000>: unsigned kexts plus the bits root patches need.
@@ -77,9 +113,7 @@ def nvidia_cards(hardware_report):
     """
     cards = []
     for name, props in (hardware_report or {}).get("GPU", {}).items():
-        if props.get("Manufacturer") != "NVIDIA":
-            continue
-        if is_supported_codename(props.get("Codename")):
+        if is_turing_or_newer(props):
             cards.append((name, props))
     return cards
 

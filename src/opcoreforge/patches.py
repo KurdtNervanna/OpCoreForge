@@ -36,6 +36,7 @@ bin directory alongside the relocated modules.
 
 from __future__ import annotations
 
+import io
 import os
 import shutil
 import subprocess
@@ -155,46 +156,91 @@ def patch_compatibility_checker() -> None:
             "Enable the NullMoth NVIDIA driver for this card? (yes/no): ")
         return str(answer).strip().lower().startswith("y")
 
+    def _print_listing(self, reclassified):
+        """Reprint the GPU verdict ourselves, since upstream's run was silenced.
+
+        Uses upstream's own ``show_macos_compatibility`` for every card except
+        the ones the driver just rescued, which get a plain Sequoia verdict
+        instead of the red "Unsupported" they would otherwise show.
+        """
+        report = self.hardware_report
+        for name, props in report.get("GPU", {}).items():
+            if name in reclassified:
+                status = "\033[1;32m{} (NullMoth driver)\033[0m".format(
+                    nvidia.TARGET_NAME)
+            else:
+                status = self.show_macos_compatibility(props.get("Compatibility"))
+            print("{}- {}: {}".format(" " * 3, name, status))
+            monitors = [
+                "{} ({})".format(mon_name, mon.get("Connector Type"))
+                for mon_name, mon in report.get("Monitor", {}).items()
+                if mon.get("Connected GPU") == name
+            ]
+            if monitors:
+                print("{}- Connected Monitor{}: {}".format(
+                    " " * 6, "s" if len(monitors) > 1 else "",
+                    ", ".join(monitors)))
+
     def check_gpu_compatibility(self):
         nvidia.reset()
         if not nvidia.find_candidates(self.hardware_report):
             return original(self)
 
-        # Run upstream, but trap its dead-end exit so we can offer the driver
-        # rather than let the program stop. Everything upstream prints and every
-        # GPU's Compatibility is in place by the time it reaches the exit.
+        # Run upstream silently -- both its GPU listing and its dead-end -- so a
+        # card the NullMoth driver now supports never shows the red "Unsupported"
+        # and "do NOT spam my inbox" text. We reprint a clean verdict below. The
+        # dead-end exit is trapped; its "Press Enter" prompt is swallowed.
+        real_stdout = sys.stdout
         saved_exit = self.utils.exit_program
+        saved_input = self.utils.request_input
         stopped = {"hit": False}
 
         def _trap_exit(*_a, **_k):
             stopped["hit"] = True
             raise _ResumeAfterStop()
 
+        sys.stdout = io.StringIO()
         self.utils.exit_program = _trap_exit
+        self.utils.request_input = lambda *_a, **_k: ""
         try:
             original(self)
         except _ResumeAfterStop:
             pass
         finally:
+            sys.stdout = real_stdout
             self.utils.exit_program = saved_exit
-
-        if not stopped["hit"]:
-            # Another GPU is supported; upstream did not stop. Leave its result
-            # alone rather than pinning the whole machine to Sequoia.
-            return None
+            self.utils.request_input = saved_input
 
         candidates = nvidia.find_candidates(self.hardware_report)
+
+        if not stopped["hit"]:
+            # Another GPU is supported; upstream did not stop. Show the real
+            # verdict (suppressed above) and leave it alone -- don't pin the
+            # whole machine to Sequoia for a secondary NVIDIA card.
+            _print_listing(self, set())
+            return None
+
         if not candidates or not _offer(self, candidates):
-            # Reproduce upstream's visible stop exactly.
+            _print_listing(self, set())
+            print("")
+            if candidates:
+                names = ", ".join(name for name, _ in candidates)
+                print("The NullMoth NVIDIA driver was declined for {}.".format(
+                    names))
+            print("No GPU here can run macOS as configured, so there is nothing "
+                  "to build.")
             self.utils.request_input()
             self.utils.exit_program()
             return None
 
         nvidia.set_engaged(True)
-        for _name, props in candidates:
+        reclassified = set()
+        for name, props in candidates:
             props["Compatibility"] = nvidia.COMPATIBILITY
             props.pop("OCLP Compatibility", None)
+            reclassified.add(name)
         self._restrict_native_compatibility(nvidia.COMPATIBILITY)
+        _print_listing(self, reclassified)
         print("")
         print("NullMoth NVIDIA driver enabled -- target: {}.".format(
             nvidia.TARGET_NAME))

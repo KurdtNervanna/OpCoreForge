@@ -4,6 +4,10 @@ Every delivered build gets its own version, so you can always tell which one
 you are running: it is in the title bar, in `OpCoreForge.exe --version`, at the
 top of `--self-test`, and in the release zip's filename.
 
+## 1.3.0 - 2026-10-13
+
+- NVIDIA Turing and newer (RTX 20/30/40/50, GTX 16) can now reach macOS Sequoia. Upstream dead-ends on these cards as unsupported; when such a card is the only reason a machine is refused, OpCoreForge offers the NullMoth driver (github.com/nullmoth/nvidia-macos-driver) and, on yes, builds the EFI for Sequoia with its exact OpenCore settings written into config.plist - csr-active-config, the nvfb/nvaccel boot-args, the NVRAM block, IONDRVSupport blocked and SecureBootModel disabled. The kexts are not in the EFI; they install into /Library/Extensions after macOS is up, by the driver's own installer. Declining, or a machine with another supported GPU, keeps upstream's behaviour. Referenced, never redistributed (PolyForm Noncommercial). See docs/NVIDIA-DRIVER.md
+
 ## 1.2.6 - 2026-09-16
 
 - README: screenshots of the running application, captured by the GUI suite against the synthetic hardware fixture and published by tools/make_shots.py, plus the icon in the header. The release archive now carries docs/ as well

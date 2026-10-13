@@ -4,6 +4,10 @@ Every delivered build gets its own version, so you can always tell which one
 you are running: it is in the title bar, in `OpCoreForge.exe --version`, at the
 top of `--self-test`, and in the release zip's filename.
 
+## 1.3.1 - 2026-10-13
+
+- Fix startup failure 'Could not get latest iasl for Windows'. OpCore-Simplify's DSDT.get_latest_iasl inspects only acpica's latest GitHub release, but acpica now cuts source-only releases with no Windows binary (20260930 ships just the Unix iasl), so the ACPI compiler could be neither bundled by make_seed nor downloaded on first run - a hard startup crash. patches.py now walks the acpica releases newest-to-oldest and picks the first iasl-win-*.zip (currently 20260408), falling back to upstream's method; applied in apply_all so both the seed build and the executable's first run are covered. No vendored source edited.
+
 ## 1.3.0 - 2026-10-13
 
 - NVIDIA Turing and newer (RTX 20/30/40/50, GTX 16) can now reach macOS Sequoia. Upstream dead-ends on these cards as unsupported; when such a card is the only reason a machine is refused, OpCoreForge offers the NullMoth driver (github.com/nullmoth/nvidia-macos-driver) and, on yes, builds the EFI for Sequoia with its exact OpenCore settings written into config.plist - csr-active-config, the nvfb/nvaccel boot-args, the NVRAM block, IONDRVSupport blocked and SecureBootModel disabled. The kexts are not in the EFI; they install into /Library/Extensions after macOS is up, by the driver's own installer. Declining, or a machine with another supported GPU, keeps upstream's behaviour. Referenced, never redistributed (PolyForm Noncommercial). See docs/NVIDIA-DRIVER.md

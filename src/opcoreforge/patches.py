@@ -204,6 +204,60 @@ def patch_compatibility_checker() -> None:
     checker_cls.check_gpu_compatibility = check_gpu_compatibility
 
 
+def patch_iasl_resolver() -> None:
+    """Resolve the Windows iasl from the newest acpica release that ships it.
+
+    OpCore-Simplify's ``DSDT.get_latest_iasl`` inspects only the *latest*
+    acpica release, but acpica cuts source-only releases with no Windows
+    binary (e.g. 20260930 carries just the Unix ``iasl``). Upstream then dies
+    with "Could not get latest iasl for Windows" -- both when make_seed.py
+    builds the payload and on the executable's first run, which is a hard
+    startup failure because every flow needs the ACPI compiler.
+
+    This walks the releases page newest-to-oldest and returns the first
+    ``iasl*win*.zip`` it finds -- what upstream meant to do. It falls back to
+    upstream's own method if anything about the page is not as expected, and is
+    done here so re-vendoring cannot drop it (see the module docstring).
+    """
+    from ocs_scripts import dsdt as _dsdt
+
+    dsdt_cls = _dsdt.DSDT
+    original = dsdt_cls.get_latest_iasl
+    if getattr(original, "_nullmoth_wrapped", False):
+        return
+
+    def get_latest_iasl(self):
+        try:
+            github = self.github
+            releases_url = "https://github.com/acpica/acpica/releases"
+            page = github.fetcher.fetch_and_parse_content(releases_url)
+            if page:
+                tags = []
+                for line in page.splitlines():
+                    if "<a" in line and 'href="' in line and "/releases/tag/" in line:
+                        tag = line.split("/releases/tag/")[1].split('"')[0]
+                        if tag and tag not in tags:
+                            tags.append(tag)
+                for tag in tags:
+                    assets_url = (
+                        "https://github.com/acpica/acpica/releases/"
+                        "expanded_assets/{}".format(tag))
+                    assets_page = github.fetcher.fetch_and_parse_content(assets_url)
+                    if not assets_page:
+                        continue
+                    for asset in github._extract_assets(assets_page):
+                        url = (asset.get("url") or "").lower()
+                        if "iasl" in url and "win" in url and url.endswith(".zip"):
+                            return asset.get("url")
+        except Exception:
+            pass
+        # Anything unexpected: defer to upstream's latest-release-only logic.
+        return original(self)
+
+    get_latest_iasl._nullmoth_wrapped = True
+    dsdt_cls.get_latest_iasl = get_latest_iasl
+
+
 def repair_instance_paths(paths: _paths.Paths, *objects) -> None:
     """Fix up already-constructed OpCore-Simplify objects.
 
@@ -360,6 +414,7 @@ def apply_all(paths: _paths.Paths | None = None) -> _paths.Paths:
     os.environ.setdefault("TERM_PROGRAM", "")
 
     patch_opcore_simplify(paths)
+    patch_iasl_resolver()
     patch_usbtoolbox(paths)
     patch_propertree(paths)
     _applied = True

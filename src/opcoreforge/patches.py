@@ -108,6 +108,101 @@ def patch_opcore_simplify(paths: _paths.Paths) -> None:
     # constructed is repaired defensively below.
     kext_maestro.KextMaestro.ock_files_dir = str(paths.ock_files)
 
+    patch_compatibility_checker()
+
+
+def patch_compatibility_checker() -> None:
+    """Offer the NullMoth NVIDIA driver instead of dead-ending on Turing+ cards.
+
+    OpCore-Simplify's ``check_gpu_compatibility`` prints "You cannot install
+    macOS without a supported GPU" and exits when every GPU is unsupported --
+    which, to Apple, a Turing or newer GeForce card is. The NullMoth driver
+    (see ``opcoreforge.nvidia``) runs those cards on macOS Sequoia, so when one
+    is the *only* reason for the dead-end we ask the user whether to enable it,
+    and on "yes" reclassify the card as Sequoia-capable before the flow gives
+    up.
+
+    Declining -- or a machine that already has a supported GPU, so upstream
+    never stops -- preserves upstream's behaviour exactly, including the visible
+    stop its own regression test checks for.
+
+    Done here rather than in ``src/vendor`` so re-vendoring a newer upstream
+    cannot silently drop it (see the module docstring).
+    """
+    from ocs_scripts import compatibility_checker
+
+    from . import nvidia
+
+    checker_cls = compatibility_checker.CompatibilityChecker
+    original = checker_cls.check_gpu_compatibility
+    if getattr(original, "_nullmoth_wrapped", False):
+        return
+
+    class _ResumeAfterStop(Exception):
+        """Raised in place of upstream's exit so we regain control."""
+
+    def _offer(self, candidates) -> bool:
+        names = ", ".join(name for name, _ in candidates)
+        plural = len(candidates) != 1
+        print("")
+        print("No Apple driver exists for {}.".format(names))
+        print("The NullMoth driver can run {} on {}:".format(
+            "them" if plural else "it", nvidia.TARGET_NAME))
+        print("    {}".format(nvidia.REPO_URL))
+        print("OpCoreForge writes the OpenCore settings for it; the kexts are "
+              "installed by hand after macOS is up.")
+        answer = self.utils.request_input(
+            "Enable the NullMoth NVIDIA driver for this card? (yes/no): ")
+        return str(answer).strip().lower().startswith("y")
+
+    def check_gpu_compatibility(self):
+        nvidia.reset()
+        if not nvidia.find_candidates(self.hardware_report):
+            return original(self)
+
+        # Run upstream, but trap its dead-end exit so we can offer the driver
+        # rather than let the program stop. Everything upstream prints and every
+        # GPU's Compatibility is in place by the time it reaches the exit.
+        saved_exit = self.utils.exit_program
+        stopped = {"hit": False}
+
+        def _trap_exit(*_a, **_k):
+            stopped["hit"] = True
+            raise _ResumeAfterStop()
+
+        self.utils.exit_program = _trap_exit
+        try:
+            original(self)
+        except _ResumeAfterStop:
+            pass
+        finally:
+            self.utils.exit_program = saved_exit
+
+        if not stopped["hit"]:
+            # Another GPU is supported; upstream did not stop. Leave its result
+            # alone rather than pinning the whole machine to Sequoia.
+            return None
+
+        candidates = nvidia.find_candidates(self.hardware_report)
+        if not candidates or not _offer(self, candidates):
+            # Reproduce upstream's visible stop exactly.
+            self.utils.request_input()
+            self.utils.exit_program()
+            return None
+
+        nvidia.set_engaged(True)
+        for _name, props in candidates:
+            props["Compatibility"] = nvidia.COMPATIBILITY
+            props.pop("OCLP Compatibility", None)
+        self._restrict_native_compatibility(nvidia.COMPATIBILITY)
+        print("")
+        print("NullMoth NVIDIA driver enabled -- target: {}.".format(
+            nvidia.TARGET_NAME))
+        return None
+
+    check_gpu_compatibility._nullmoth_wrapped = True
+    checker_cls.check_gpu_compatibility = check_gpu_compatibility
+
 
 def repair_instance_paths(paths: _paths.Paths, *objects) -> None:
     """Fix up already-constructed OpCore-Simplify objects.

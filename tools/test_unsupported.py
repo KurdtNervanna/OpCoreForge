@@ -122,6 +122,11 @@ def main():
         hardware = app.stages["hardware"]
         hardware.ensure_built()
 
+        # A Turing card now triggers an offer to enable the NullMoth NVIDIA
+        # driver (see opcoreforge.nvidia). Decline it, so this test still
+        # exercises upstream's hard stop -- the thing it was written to guard.
+        app.ocs.bridge.auto_answer(r"NullMoth NVIDIA driver", "no")
+
         # 1. the controller must raise a *fatal* abort carrying the reason
         def raises():
             try:

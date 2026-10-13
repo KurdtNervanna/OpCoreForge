@@ -40,6 +40,24 @@ that publish them — OpenCorePkg (Acidanthera), the individual kext releases,
 and Apple's recovery servers for the macOS installer image in stage 10. They
 keep their own licences and none of them are in this repository.
 
+## Referenced, not redistributed: the NullMoth NVIDIA driver
+
+OpCoreForge can configure OpenCore for the
+[NullMoth NVIDIA driver](https://github.com/nullmoth/nvidia-macos-driver),
+which runs Turing and newer GeForce cards on macOS Sequoia (see
+`docs/NVIDIA-DRIVER.md`). **None of that project is in this repository or in a
+built `OpCoreForge.exe`.** OpCoreForge writes the OpenCore settings the driver's
+README specifies and links to the upstream release; the user downloads and
+installs the driver themselves, after macOS is up.
+
+The driver's plugin, kexts, build and package code are **PolyForm Noncommercial
+1.0.0**, © NullMoth Systems — personal, research, educational and non-profit use
+only. Its shader translator is LGPL-3.0-or-later and its Mesa/NVK changes are
+MIT. Because nothing from it is redistributed here, those terms bind the driver
+you download, not OpCoreForge. The constants OpCoreForge writes into a
+`config.plist` (an NVRAM GUID, a `csr-active-config` value, a boot-args line, a
+kext identifier to block) are configuration facts, not the driver's code.
+
 ## OpCoreForge itself
 
 Everything outside `src/vendor/` — `src/opcoreforge/`, `src/compat/`,

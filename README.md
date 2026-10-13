@@ -437,6 +437,7 @@ python tools/test_gui.py          # 66 checks driving the real window, with scre
 python tools/test_embed.py        # 33 checks on the ProperTree embedding
 python tools/test_editor_window.py # 18 checks on the editor as its own window
 python tools/test_unsupported.py  # 13 checks: a refusal must be visible, not silent
+python tools/test_nvidia_driver.py # 21 checks: NullMoth NVIDIA driver on Sequoia
 python tools/test_netdiag.py      # 31 checks: name the real cause of a failed download
 python tools/test_gpu_ceiling.py  # 24 checks: refuse macOS no GPU here can drive
 python tools/test_diagnostics.py  # 76 checks: session log, frozen paths, COM, elevation
@@ -486,6 +487,15 @@ failure that takes the application down before a dialog can be read.
   OpCoreForge marks those rows and refuses them, naming the GPU and the newest
   release it can display; chosen anyway, upstream disables every GPU and the
   next step dies reading an empty list.
+- **NVIDIA Turing and newer can reach Sequoia.** To Apple these cards have no
+  driver, so upstream dead-ends on them. The
+  [NullMoth driver](https://github.com/nullmoth/nvidia-macos-driver) is a Metal
+  driver that runs them on macOS 15 Sequoia through OpenCore configuration, and
+  when such a card is the only reason a machine would be refused, OpCoreForge
+  offers it: say yes and the EFI is built for Sequoia with the driver's
+  settings written in. The kexts are not in the EFI — they install after macOS
+  is up. [`docs/NVIDIA-DRIVER.md`](docs/NVIDIA-DRIVER.md) has the detail, and
+  the driver is PolyForm Noncommercial (personal / research / non-profit use).
 - **Windows is the only supported platform.** Hardware Sniffer is a Windows
   binary, USB port discovery reads live PnP data through WMI, the ACPI dump
   needs an elevated Windows process, and the USB writer uses `diskpart`. Much

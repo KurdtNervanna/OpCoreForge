@@ -605,8 +605,37 @@ class OcsController:
         self.ocpe.build_opencore_efi(
             self.customized_hardware, self.disabled_devices, self.smbios_model,
             self.macos_version, self.needs_oclp)
+        self._apply_nullmoth_driver()
         self.built = True
         return Path(self.ocpe.result_dir)
+
+    def _apply_nullmoth_driver(self) -> list[str]:
+        """Stamp the NullMoth NVIDIA driver's OpenCore settings into the build.
+
+        Runs only when the user enabled the driver at the compatibility step
+        (``nvidia.engaged()``) and the chosen macOS is the one it supports --
+        Sequoia. The kexts themselves are never added to the EFI; they install
+        into /Library/Extensions after macOS is up. See ``opcoreforge.nvidia``.
+        """
+        from .. import nvidia
+
+        if not nvidia.engaged() or not nvidia.targets_sequoia(self.macos_version):
+            return []
+
+        config_path = str(self.paths.config_plist)
+        config = self.ocpe.u.read_file(config_path)
+        if not config:
+            return []
+
+        changes = nvidia.apply_to_config(config, self.macos_version)
+        if changes:
+            self.ocpe.u.write_file(config_path, config)
+
+        names = [name for name, _ in nvidia.nvidia_cards(self.hardware_report)]
+        print("")
+        for line in nvidia.post_install_notes(names):
+            print(line)
+        return changes
 
     # -- USB hand-off -----------------------------------------------------
 

@@ -18,4 +18,4 @@ __version__ = "1.3.3"
 # than this proves the clock is wrong -- which breaks every HTTPS download
 # with a certificate error that says nothing about clocks. Kept in step by
 # build/bump_version.py.
-__released__ = "2026-10-13"
+__released__ = "2026-10-19"

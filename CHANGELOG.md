@@ -4,6 +4,10 @@ Every delivered build gets its own version, so you can always tell which one
 you are running: it is in the title bar, in `OpCoreForge.exe --version`, at the
 top of `--self-test`, and in the release zip's filename.
 
+## 1.3.3 - 2026-10-19
+
+- Fix the USB map's "Port N is missing a connector type!" pointing at the wrong port. USBToolBox numbers ports with one running count across every controller, while the table shows each port's own name, so the message could name a port that plainly had a type while the real culprit sat elsewhere (typically an enabled port showing 'not set', or one on another controller). The message now names the port and its controller as the table shows them, and the offending row is selected so its connector type can be set straight away. The inspector's "Companion of port N" now uses the companion's name for the same reason.
+
 ## 1.3.2 - 2026-10-13
 
 - Recognise NVIDIA Turing+ by PCI device id, and stop showing the dead-end text for cards the NullMoth driver supports. Real Hardware Sniffer reports often give an NVIDIA Codename of 'Unknown' (as on a GTX 1660 Ti), so matching on codename alone missed the card and the offer never appeared - the user saw upstream's blunt 'You cannot install macOS without a supported GPU / do NOT spam my inbox' instead. Detection now keys on vendor 10DE with device id >= 0x1E00 (Turing and newer, no gaps), falling back to the codename only when the id will not parse. The compatibility step now runs upstream's GPU check silently and reprints a clean verdict, so a supported NVIDIA card shows its macOS Sequoia (NullMoth driver) line and the scare text never reaches the screen; declining prints a plain stop instead.

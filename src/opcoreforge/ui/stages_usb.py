@@ -343,7 +343,7 @@ class UsbStage(Stage):
         text = "%s\n%s" % (self.app.usb.port_label(port),
                            self.app.usb.controller_label(controller))
         if companion:
-            text += "\nCompanion of port %s" % companion["selection_index"]
+            text += "\nCompanion of %s" % companion["name"]
         self.port_name.configure(text=text)
         self.comment_var.set(port.get("comment") or "")
         from utb_scripts import shared
@@ -355,6 +355,16 @@ class UsbStage(Stage):
             self.type_var.set("%d - %s" % (int(member), str(member)))
         else:
             self.type_var.set("")
+
+    def _focus_port(self, port):
+        """Select and scroll to the row showing port, if it is in the table."""
+        for iid, (_controller, candidate) in self._row_index.items():
+            if candidate is port:
+                self.tree.see(iid)
+                self.tree.focus(iid)
+                self.tree.selection_set(iid)
+                self._sync_inspector()
+                return
 
     def _apply_type(self, _event=None):
         item = self.tree.focus()
@@ -431,6 +441,7 @@ class UsbStage(Stage):
         errors = usb.validate()
         if errors:
             self.banner.show("  ".join(errors), "bad")
+            self._focus_port(usb.problem_ports[0] if usb.problem_ports else None)
             return
 
         empty = usb.empty_controllers()

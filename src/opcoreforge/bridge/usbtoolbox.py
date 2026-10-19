@@ -230,6 +230,7 @@ class UsbController:
         self.map = None
         self.broker = None
         self.last_errors: list[str] = []
+        self.problem_ports: list[dict] = []
 
     # -- availability -----------------------------------------------------
 
@@ -395,8 +396,31 @@ class UsbController:
         for title, lines in self.broker.captured.items():
             if title == "Selection Validation":
                 errors.extend(l for l in lines if l.strip())
+        self.problem_ports = []
+        errors = [self._describe_error(e) for e in errors]
         self.last_errors = errors
         return [] if ok else (errors or ["Selection is not valid."])
+
+    _PORT_ERROR = re.compile(r"^Port (\d+) (.*)$")
+
+    def _describe_error(self, error: str) -> str:
+        """Re-word an upstream error in the GUI's terms.
+
+        Upstream names a port by ``selection_index``, a running count across
+        every controller, while the table shows each port's own name - so
+        "Port 17" in upstream's message is usually not the row labelled
+        Port 17.  Name the port and its controller the way the table does.
+        """
+        match = self._PORT_ERROR.match(error)
+        if not match:
+            return error
+        number = int(match.group(1))
+        for controller, port in self.ports():
+            if port.get("selection_index") == number:
+                self.problem_ports.append(port)
+                return "%s on %s %s" % (port["name"], controller["name"],
+                                        match.group(2))
+        return error
 
     def empty_controllers(self):
         return [c for c in self.controllers

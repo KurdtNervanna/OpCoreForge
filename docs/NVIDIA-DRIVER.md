@@ -20,9 +20,17 @@ refused, the compatibility step offers the driver instead of stopping:
 > No Apple driver exists for NVIDIA GeForce RTX 4070.
 > The NullMoth driver can run it on macOS Sequoia 15:
 >     https://github.com/nullmoth/nvidia-macos-driver
+> OpCoreForge writes the OpenCore settings for it; the kexts are installed by hand after macOS is up.
 > Enable the NullMoth NVIDIA driver for this card? (yes/no):
 
-Decline, and nothing changes — you get upstream's usual stop. Accept, and the
+Decline, and the machine is still refused, but with a plain reason that names
+the card rather than upstream's text:
+
+> macOS has no driver for NVIDIA GeForce RTX 4070, and macOS cannot be
+> installed without a supported GPU. The NullMoth NVIDIA driver was declined,
+> so there is nothing to build.
+
+The stop dialog and the stage 1 banner both lead with that sentence. Accept, and the
 card is treated as Sequoia-capable, Sequoia becomes the build target, and when
 the EFI is built OpCoreForge writes the driver's required OpenCore settings into
 `config.plist`. If the machine already has a GPU macOS supports, no offer is

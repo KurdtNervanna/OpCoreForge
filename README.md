@@ -77,9 +77,17 @@ up or retouched: it is the real window rendering real data.
 
 ---
 
+## Getting it
+
+Download **`OpCoreForge.exe`** from the
+[latest release](https://github.com/KurdtNervanna/OpCoreForge/releases/latest)
+and run it; there is nothing to install. The macOS companion,
+`OpCoreForge-Companion.dmg`, is attached to the same release, and stage 6 puts
+it on the install media for you.
+
 ## Building the executable
 
-On the Windows machine, with [Python 3.9+](https://www.python.org/downloads/)
+To build it yourself instead, on the Windows machine, with [Python 3.9+](https://www.python.org/downloads/)
 installed ("Add python.exe to PATH" ticked):
 
 ```
@@ -88,7 +96,7 @@ BUILD_EXE.bat
 
 That is the whole procedure. It creates a local virtual environment, installs
 PyInstaller and pywin32 into it, downloads the OpenCore payload to bundle, and
-writes **`dist\OpCoreForge.exe`** — one file, roughly 70 MB, that you can copy
+writes **`dist\OpCoreForge.exe`** — one file, roughly 100 MB, that you can copy
 anywhere and double-click.
 
 To confirm a build is complete:
@@ -221,7 +229,10 @@ already for the same model — and lays out the folder. From that folder:
     gets a 16 GB partition and the rest is left unallocated.
 
   The `diskpart` script is built by a pure function, logged before it
-  executes, and asserted on in tests without a disk present.
+  executes, and asserted on in tests without a disk present. When Windows
+  answers "Access is denied" — something still has a just-inserted drive
+  open, such as AutoPlay or an antivirus scan — the same script is run again
+  after a pause, up to three times, before the error is shown.
 - **The ISO.** For VMs. A UEFI machine boots an ISO through an El Torito
   catalog entry pointing at a FAT image the firmware mounts as an EFI System
   Partition, so the media goes into a FAT32 image — written from scratch,
@@ -319,9 +330,10 @@ Sequoia and later: System Settings › Privacy & Security › Open Anyway).
 **Building it.** It has to be built on a Mac, so GitHub Actions does it
 (`.github/workflows/companion.yml`, an Intel runner): the tests, a PyInstaller
 build from `Companion.spec`, a self-test of the finished app, and the disk
-image. Publishing a release attaches `OpCoreForge-Companion.dmg` to it a few
-minutes later, which is where stage 6 downloads it from: first the release
-matching its own version, then the latest. A `.dmg` dropped into
+image. The release workflow (see [Releases](#releases)) attaches
+`OpCoreForge-Companion.dmg` to every release it makes, and a release published
+by hand gets it a few minutes later, which is where stage 6 downloads it from:
+first the release matching its own version, then the latest. A `.dmg` dropped into
 `OpCoreForge_Data\Companion` by hand is used as it is. To build one on a Mac
 yourself, use Python from python.org (it targets macOS 10.13 and bundles Tk):
 
@@ -491,10 +503,10 @@ Every delivered build gets its own version, so two builds are never
 confusable. It appears in four places:
 
 ```
-title bar                     OpCoreForge 1.1.0
-OpCoreForge.exe --version     OpCoreForge 1.1.0
-OpCoreForge.exe --self-test   OpCoreForge 1.1.0 self test
-Explorer > Properties         File version 1.1.0
+title bar                     OpCoreForge 2.1.2
+OpCoreForge.exe --version     OpCoreForge 2.1.2
+OpCoreForge.exe --self-test   OpCoreForge 2.1.2 self test
+Explorer > Properties         File version 2.1.2
 ```
 
 `CHANGELOG.md` records what changed in each one. The version lives in exactly
@@ -510,6 +522,20 @@ python build/bump_version.py --show                      # current version
 That writes the new number and adds the changelog entry in one step, so the two
 cannot drift apart. The .exe keeps its stable name — shortcuts and the data
 folder stay put — and the release zip carries the version instead.
+
+### Releases
+
+A release is made by GitHub Actions, from **Actions › Release › Run workflow**
+on `main` (`.github/workflows/release.yml`). It reads the version from
+`version.py` and refuses to run if that release already exists, so bump first.
+Then it:
+
+1. builds `OpCoreForge.exe` on a Windows runner the way `BUILD_EXE.bat` does,
+   bundled payload included, and runs the finished executable's `--self-test`;
+2. builds `OpCoreForge-Companion.dmg` with `companion.yml`;
+3. creates the release `v<version>` with both attached. The notes are taken
+   from `CHANGELOG.md` by `build/release_notes.py` and cover every version
+   since the last published release, not just the newest.
 
 ## Keeping up with upstream
 
@@ -542,15 +568,15 @@ python tools/test_workflow.py     # 49 checks: report -> EFI -> USB map -> snaps
 python tools/test_gui.py          # 66 checks driving the real window, with screenshots
 python tools/test_embed.py        # 2 x 37 checks: the ProperTree embedding, container and wm forget
 python tools/test_editor_window.py # 18 checks on the editor as its own window
-python tools/test_unsupported.py  # 13 checks: a refusal must be visible, not silent
-python tools/test_nvidia_driver.py # 21 checks: NullMoth NVIDIA driver on Sequoia
+python tools/test_unsupported.py  # 16 checks: a refusal must be visible, not silent
+python tools/test_nvidia_driver.py # 32 checks: NullMoth NVIDIA driver on Sequoia
 python tools/test_netdiag.py      # 31 checks: name the real cause of a failed download
 python tools/test_gpu_ceiling.py  # 24 checks: refuse macOS no GPU here can drive
 python tools/test_diagnostics.py  # 75 checks: session log, frozen paths, COM, elevation
 python tools/test_pump.py         # 21 checks: the pump under a nested event loop
 python tools/test_fatimage.py     # 27 checks: the FAT32 writer, read back by mtools
 python tools/test_isoimage.py     # 18 checks: the ISO's UEFI boot chain, byte by byte
-python tools/test_media.py        # 99 checks: boards, the recovery pipeline, every USB refusal
+python tools/test_media.py        # 106 checks: boards, the recovery pipeline, every USB refusal
 python tools/test_companion.py    # 85 checks: macOS disks, the root install script run for real, the media
 python tools/test_eficheck.py     # 53 checks: config.plist must not name a file the EFI lacks
 python tools/test_progress.py     # 44 checks: progress, elapsed time, completion marks
@@ -600,7 +626,8 @@ failure that takes the application down before a dialog can be read.
   driver that runs them on macOS 15 Sequoia through OpenCore configuration, and
   when such a card is the only reason a machine would be refused, OpCoreForge
   offers it: say yes and the EFI is built for Sequoia with the driver's
-  settings written in. The kexts are not in the EFI — they install after macOS
+  settings written in. Say no and the machine is refused with a plain reason
+  that names the card. The kexts are not in the EFI — they install after macOS
   is up. [`docs/NVIDIA-DRIVER.md`](docs/NVIDIA-DRIVER.md) has the detail, and
   the driver is PolyForm Noncommercial (personal / research / non-profit use).
 - **OpCoreForge runs only on Windows; the companion only on macOS.**

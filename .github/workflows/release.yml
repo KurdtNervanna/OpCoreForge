@@ -1,0 +1,153 @@
+name: Release
+
+# Publishes v<version> from main: OpCoreForge.exe built on Windows, the
+# companion disk image built on a Mac, and notes taken from CHANGELOG.md.
+# Run it from Actions > Release > Run workflow after bump_version.py.
+#
+# The companion is built here rather than left to companion.yml's own
+# "release published" trigger, because a release created with the workflow's
+# token does not start other workflows.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the version
+        id: version
+        run: |
+          version=$(python3 build/bump_version.py --show)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing $version"
+
+      - name: Refuse a version that is already released
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::$TAG is already released. Bump the version with build/bump_version.py first."
+            exit 1
+          fi
+
+      - name: Check the changelog has an entry for it
+        run: python3 build/release_notes.py "${{ steps.version.outputs.version }}" > /dev/null
+
+  windows:
+    needs: check
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        # The same set BUILD_EXE.bat installs.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller termcolor2 certifi wmi pywin32 pycdlib
+
+      - name: Bundle the OpenCore payload
+        # As in BUILD_EXE.bat, a payload that cannot be completed is not fatal:
+        # the executable downloads whatever is missing on first use.
+        run: |
+          python build/make_seed.py
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "::warning::The bundled payload could not be built; the executable will download it on first use."
+          }
+          if (Test-Path src/seed/MANIFEST.json) {
+            $manifest = Get-Content src/seed/MANIFEST.json | ConvertFrom-Json
+            if (-not $manifest.complete) {
+              Write-Output "::warning::The bundled payload is incomplete; the executable will download the rest on first use."
+            }
+          }
+          exit 0
+
+      - name: Build OpCoreForge.exe
+        run: |
+          python -m PyInstaller --clean --noconfirm OpCoreForge.spec
+          if (-not (Test-Path dist/OpCoreForge.exe)) { throw "dist/OpCoreForge.exe was not built" }
+          $size = (Get-Item dist/OpCoreForge.exe).Length / 1MB
+          Write-Output ("OpCoreForge.exe {0:N1} MB" -f $size)
+
+      - name: Self-test the built executable
+        # The executable is windowed, so --self-test shows its report in a
+        # window and waits for Close. The same report is saved to
+        # logs/selftest.txt first; read that, then close the window.
+        run: |
+          $process = Start-Process -FilePath dist/OpCoreForge.exe -ArgumentList "--self-test" -PassThru
+          $report = $null
+          for ($i = 0; $i -lt 180 -and -not $report; $i++) {
+            Start-Sleep -Seconds 1
+            $report = Get-ChildItem -Path dist, "$env:LOCALAPPDATA\OpCoreForge" -Recurse -Filter selftest.txt -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          Start-Sleep -Seconds 2
+          if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          if (-not $report) { throw "The self-test wrote no report within three minutes." }
+          $text = Get-Content $report.FullName -Raw
+          Write-Output $text
+          if ($text -notmatch "\d+ checks, 0 failed") { throw "The self-test reported failures." }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpCoreForge-exe
+          path: dist/OpCoreForge.exe
+          if-no-files-found: error
+
+  companion:
+    needs: check
+    uses: ./.github/workflows/companion.yml
+
+  publish:
+    needs: [check, windows, companion]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: OpCoreForge-exe
+          path: assets
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: OpCoreForge-Companion
+          path: assets
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          previous=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || true)
+          if [ -n "$previous" ]; then
+            python3 build/release_notes.py "$VERSION" --since "$previous" > notes.md
+          else
+            python3 build/release_notes.py "$VERSION" > notes.md
+          fi
+          cat notes.md
+          ls -l assets
+          gh release create "v$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "OpCoreForge v$VERSION" \
+            --notes-file notes.md \
+            assets/OpCoreForge.exe assets/OpCoreForge-Companion.dmg

@@ -1,19 +1,21 @@
 """
-config.plist editing (ProperTree) and the closing checklist.
+config.plist editing (ProperTree), and the checklist the install media stage
+shows.
 
 ProperTree runs inside the tab rather than as a separate program, so OC
 Snapshot -- the step that rewrites config.plist's ACPI, Kexts, Tools and
 Drivers entries to match what is actually in the EFI folder -- happens on the
-same file the previous stages just produced. That is the step that makes the
-USB map from stage 7 take effect.
+same file the previous stages just produced. The stage is optional: the USB
+stage already updates config.plist for the port map it installs, so this is
+for changing settings, or for snapshotting after editing the EFI by hand.
 """
 
 from __future__ import annotations
 
-import os
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from ..bridge.propertree import embed_method
 from . import theme
 from .stages import Stage
 from .widgets import Banner, Card, KeyValue
@@ -21,10 +23,14 @@ from .widgets import Banner, Card, KeyValue
 
 class ConfigStage(Stage):
     key = "config"
-    label = "8 - config.plist"
+    label = "5 - config.plist (optional)"
     heading = "config.plist"
-    blurb = ("The full ProperTree editor. Run OC Snapshot after any change to the "
-             "EFI folder's contents, then save.")
+    blurb = ("Optional. The full ProperTree editor, for changing settings. The "
+             "USB stage already updated config.plist for the port map; run OC "
+             "Snapshot only after adding or removing files in the EFI folder "
+             "yourself.")
+    next_key = "media"
+    next_text = "Next: Install media  \u2192"
 
     #: written just before the editor is built, removed once it is up. Its
     #: presence at startup means the last attempt did not survive.
@@ -44,12 +50,13 @@ class ConfigStage(Stage):
     def survey_last_attempt(self) -> bool:
         """Did the previous run die while the editor was coming up?
 
-        Embedding a whole second Tk application into a tab means demoting its
-        window with ``wm forget``, and that has faulted inside Tk's own code on
-        at least one machine -- an access violation, which no amount of Python
-        error handling can catch. Rather than leave someone with an
-        application that dies every time they reach stage 8, the attempt is
-        recorded and a repeat opens the editor in its own window instead.
+        Embedding a whole second Tk application into a tab reaches past what
+        most Tk programs do, and the older way of doing it (``wm forget``)
+        faulted inside Tk's own code on at least one machine -- an access
+        violation, which no amount of Python error handling can catch. Rather
+        than leave someone with an application that dies every time they
+        reach the editor, the attempt is recorded and a repeat opens the editor
+        in its own window instead.
         """
         marker = self._marker()
         try:
@@ -67,23 +74,24 @@ class ConfigStage(Stage):
     def _wants_embedding(self) -> bool:
         """Where the editor should open, unless the person has said otherwise.
 
-        Windows gets its own window by default. Embedding demotes ProperTree's
-        window with ``wm forget``, and on the machine this was reported from
-        that faulted inside Tk itself -- three times, in three different calls,
-        every one of them while the first document was being opened, and each
-        after a fix that removed the previous one. There is no Python error to
-        catch and no Tk version to require.
+        In the tab, everywhere. On Windows the editor used to open in its own
+        window by default, because demoting ProperTree's window with
+        ``wm forget`` faulted inside Tk itself on the machine this was reported
+        from -- three times, in three different calls, every one while the
+        first document was being opened. The tab now holds it the way Tk
+        itself provides for (a ``-container`` frame the window is created in,
+        see ``bridge.propertree.embed_method``), which never converts a window
+        after the fact.
 
-        A separate window is how ProperTree runs on its own, so it is the
-        configuration with millions of hours behind it. The tab is a nicety;
-        the editor working is not. "Own window" on the toolbar overrides this
-        in either direction.
+        If that does not survive on a machine either, the marker written in
+        ``_start_editor`` catches it and the next start uses a window of its
+        own. "Own window" on the toolbar overrides this in either direction.
         """
         if self._crashed_before:
             return False
         stored = self.app.paths.read_state().get("editor_windowed")
         if stored is None:
-            return os.name != "nt"
+            return True
         return not bool(stored)
 
     def build(self):
@@ -131,6 +139,8 @@ class ConfigStage(Stage):
         more.add_command(label="Editor settings",
                          command=lambda: self.app.ptree.show_settings())
 
+        # The bar has no room for a heading, so "Next" sits at its far end.
+        self.add_next_button(bar).pack(side="right", padx=(10, 0))
         more_button = ttk.Menubutton(bar, text="More", style="Small.TButton")
         more_button.configure(menu=more)
         more_button.pack(side="right")
@@ -157,7 +167,7 @@ class ConfigStage(Stage):
                        "inside this tab. The toolbar above still drives it: OC "
                        "Snapshot, Save, Reload, Undo and the rest all act on "
                        "the same document, and it is still the config.plist "
-                       "from the EFI stage 6 built.\n\n"
+                       "from the EFI stage 3 built.\n\n"
                        "Closing that window puts it away rather than "
                        "discarding it - bring it back with the button below."
                   ).pack(anchor="w")
@@ -175,7 +185,7 @@ class ConfigStage(Stage):
         if self._starting:
             return
         if not self.app.ptree.ready:
-            # And do not build it from wherever this was called from. Stage 7
+            # And do not build it from wherever this was called from. Stage 4
             # switches to this tab from inside a callback the main-thread pump
             # delivered; constructing the editor there means ProperTree's
             # nested event loop runs inside the pump's own drain, and on
@@ -203,7 +213,8 @@ class ConfigStage(Stage):
         except Exception:
             pass
         try:
-            note("editor", "constructing ProperTree (embedded=%s)" % embed)
+            note("editor", "constructing ProperTree (embedded=%s, method=%s)"
+                 % (embed, embed and embed_method(self.app.root)))
             # Nothing of ours runs while ProperTree pumps the loop -- and it
             # pumps it repeatedly, from its constructor and again while it
             # populates the tree. Its windows are being re-parented and a log
@@ -238,12 +249,12 @@ class ConfigStage(Stage):
                     "The last attempt to put the editor inside this tab did "
                     "not survive, so it has been opened in its own window "
                     "instead. Everything works the same - OC Snapshot still "
-                    "points at the EFI stage 6 built.", "warn")
+                    "points at the EFI stage 3 built.", "warn")
             else:
                 self.banner.show(
                     "The editor is open in its own window, which is how "
                     "ProperTree runs normally. The toolbar above drives it, "
-                    "and it is the config.plist from the EFI stage 6 built.",
+                    "and it is the config.plist from the EFI stage 3 built.",
                     "info")
         else:
             self.away.pack_forget()
@@ -263,7 +274,7 @@ class ConfigStage(Stage):
     def _open_built_config(self):
         target = self.app.paths.config_plist
         if not target.exists():
-            self.banner.show("Build the EFI in stage 6 first - there is no "
+            self.banner.show("Build the EFI in stage 3 first - there is no "
                              "config.plist to edit yet.", "warn")
             return
         if self.loaded_path == str(target) and not self.app.efi_changed:
@@ -271,15 +282,16 @@ class ConfigStage(Stage):
         if self.app.ptree.open_path(target):
             self.loaded_path = str(target)
             self.app.efi_changed = False
-            if self.app.usb_map_installed:
-                self.banner.show(
-                    "UTBMap.kext was added to the EFI. Run OC Snapshot now so "
-                    "config.plist lists it, then save.", "warn")
-            else:
-                self.banner.show(
-                    "Editing the config.plist from the EFI you just built. Run "
-                    "OC Snapshot whenever you add or remove files in the EFI "
-                    "folder.", "info")
+            # One message, matching the USB stage's: the port map is already
+            # in config.plist, so nothing here is required.
+            self.banner.show(
+                "%s Nothing here is required - change what you want and save. "
+                "Run OC Snapshot only after adding or removing files in the "
+                "EFI folder yourself." % (
+                    "The USB stage already added UTBMap.kext to config.plist."
+                    if self.app.usb_map_installed else
+                    "This is the config.plist from the EFI you just built."),
+                "info")
 
     def _raise_editor(self):
         if not self.app.ptree.show_window():
@@ -289,7 +301,7 @@ class ConfigStage(Stage):
     def _snapshot(self, clean=False):
         if not self.app.ptree.ready:
             return
-        # The OC folder is the one stage 6 built, so do not make the user
+        # The OC folder is the one stage 3 built, so do not make the user
         # go and find it; fall back to the picker if it is somehow missing.
         oc_folder = self.app.paths.oc_dir
         try:
@@ -308,11 +320,9 @@ class ConfigStage(Stage):
         if not self.app.ptree.ready:
             return
         self.app.ptree.save()
-        self.app.unlock("finish")
-        # Stage 10 needs the finished EFI, which is what saving produces.
-        self.app.unlock("media")
+        self.app.mark_done(self.key)
         self._update_status()
-        self.banner.show("Saved. Stage 9 has the remaining steps.", "good")
+        self.banner.show("Saved. The install media is the next step.", "good")
 
     def _reload(self):
         if self.app.ptree.ready:
@@ -327,57 +337,42 @@ class ConfigStage(Stage):
         self.status.configure(text="%s%s" % (path, edited))
 
 
-class FinishStage(Stage):
-    key = "finish"
-    label = "9 - Finish"
-    heading = "Finish up"
-    blurb = "What was produced, and what is left to do on the target machine."
+class Checklist:
+    """What was built, and what the target machine needs before and after.
 
-    def build(self):
-        self.header(self)
-        from .widgets import ScrollFrame
+    This was a stage of its own ("Finish") that came *before* the install
+    media and told people to copy the EFI onto a stick by hand -- which is
+    what the install media stage does. It now lives inside that stage as one
+    card, built into whatever parent it is given.
+    """
 
-        # Keep the action buttons pinned; the checklist above them scrolls.
-        buttons = ttk.Frame(self, style="TFrame")
-        buttons.pack(fill="x", side="bottom", padx=18, pady=(0, 14))
-        ttk.Button(buttons, text="Open EFI folder", style="Accent.TButton",
-                   command=lambda: self.app.open_path(self.app.paths.results)
-                   ).pack(side="left")
-        ttk.Button(buttons, text="Open data folder",
-                   command=lambda: self.app.open_path(self.app.paths.data)
-                   ).pack(side="left", padx=(8, 0))
-
-        scroll = ScrollFrame(self)
-        scroll.pack(fill="both", expand=True, padx=18, pady=(0, 10))
-        body = scroll.body
-
-        self.banner = Banner(body)
-
-        summary_card = Card(body, "What was built")
-        summary_card.pack(fill="x", pady=(0, 12))
-        self.summary = KeyValue(summary_card.body)
+    def __init__(self, app, parent):
+        self.app = app
+        card = Card(parent, "Before you boot it, and after")
+        card.pack(fill="x", pady=(0, 12))
+        self.card = card
+        self.summary = KeyValue(card.body)
         self.summary.pack(fill="x")
-
-        steps_card = Card(body, "Remaining steps")
-        steps_card.pack(fill="x", pady=(0, 12))
-        self.steps = tk.Text(steps_card.body, background=theme.PANEL_ALT,
+        self.steps = tk.Text(card.body, background=theme.PANEL_ALT,
                              foreground=theme.TEXT, borderwidth=0,
-                             highlightthickness=0, wrap="word", height=22,
+                             highlightthickness=0, wrap="word", height=16,
                              state="disabled")
         if theme.FONTS:
             self.steps.configure(font=theme.FONTS.body)
         self.steps.tag_configure("head", foreground=theme.ACCENT,
                                  font=theme.FONTS.body_bold if theme.FONTS else None)
         self.steps.tag_configure("warn", foreground=theme.YELLOW)
-        self.steps.pack(fill="both", expand=True)
-
-    def on_enter(self):
-        self.ensure_built()
-        self.refresh()
+        self.steps.pack(fill="both", expand=True, pady=(10, 0))
+        buttons = ttk.Frame(card.body, style="Card.TFrame")
+        buttons.pack(fill="x", pady=(10, 0))
+        ttk.Button(buttons, text="Open EFI folder",
+                   command=lambda: self.app.open_path(self.app.paths.results)
+                   ).pack(side="left")
+        ttk.Button(buttons, text="Open data folder",
+                   command=lambda: self.app.open_path(self.app.paths.data)
+                   ).pack(side="left", padx=(8, 0))
 
     def refresh(self):
-        if not self.built:
-            return
         ocs = self.app.ocs
         if ocs.macos_version:
             from ocs_scripts.datasets import os_data
@@ -444,22 +439,16 @@ class FinishStage(Stage):
                 item(action)
             for problem in broken:
                 item("%s - OpenCore will stop on this. Run OC Snapshot in "
-                     "stage 8, or put the file back." % problem, "warn")
+                     "stage 5, or put the file back." % problem, "warn")
             for problem in notes:
                 item(str(problem), "warn")
             lines.append((None, "\n"))
-
-        section("Copy the EFI onto the boot drive")
-        item("Format a USB stick as FAT32 with a GUID/GPT partition map.")
-        item("Copy the EFI folder from the Results directory to the root of it.")
-        item("Boot from that stick and select macOS in the OpenCore picker.")
-        lines.append((None, "\n"))
 
         if not self.app.usb_map_installed:
             section("USB ports are not mapped")
             item("The EFI ships UTBDefault.kext, a generic map. Expect to lose "
                  "USB 3 speeds, internal Bluetooth or sleep until you go back "
-                 "to stage 7 and map the ports on the target machine.", "warn")
+                 "to stage 4 and map the ports on the target machine.", "warn")
             lines.append((None, "\n"))
 
         if ocs.needs_oclp:
@@ -470,8 +459,16 @@ class FinishStage(Stage):
                  "installers rather than deltas.", "warn")
             lines.append((None, "\n"))
 
+        section("Once macOS is installed")
+        item("Open the OpCoreForge folder on the stick and run OpCoreForge "
+             "Companion from the disk image. It puts OpenCore on the "
+             "machine's own disk, so the stick is no longer needed to start "
+             "it.")
+        lines.append((None, "\n"))
+
         section("If something does not boot")
-        item("Re-run OC Snapshot in stage 8 after any change to the EFI folder.")
+        item("Re-run OC Snapshot in stage 5 after adding or removing files in "
+             "the EFI folder yourself.")
         item("Serial numbers are generated fresh in config.plist - do not reuse "
              "one across machines.")
         item("Keep this data folder: it caches OpenCore, kexts and your port map "
@@ -482,10 +479,8 @@ class FinishStage(Stage):
         for tag, text in lines:
             self.steps.insert("end", text, (tag,) if tag else ())
         self.steps.configure(state="disabled")
-
-        if self.app.usb_map_installed:
-            self.banner.show("Complete: EFI built, USB ports mapped, "
-                             "config.plist snapshotted.", "good")
-        else:
-            self.banner.show("EFI built. USB mapping is still outstanding.",
-                             "warn")
+        # Tall enough for what it says and no taller: a fixed height left a
+        # gap under a short list and hid the end of a long one. Long lines
+        # wrap, so each is counted at roughly a hundred characters a row.
+        rows = sum(1 + len(text.rstrip("\n")) // 110 for _tag, text in lines)
+        self.steps.configure(height=max(4, rows + 1))

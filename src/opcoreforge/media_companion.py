@@ -1,7 +1,7 @@
 """
 The companion app's place on the install media.
 
-Stage 10 adds an ``OpCoreForge`` folder beside ``EFI`` and the recovery:
+The install media stage adds an ``OpCoreForge`` folder beside ``EFI`` and the recovery:
 
     OpCoreForge/
         OpCoreForge-Companion.dmg   the macOS app, if it could be had

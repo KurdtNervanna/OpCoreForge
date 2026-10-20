@@ -133,6 +133,7 @@ def make_app(app_module):
                   "smbios": FakeStage("3 - SMBIOS")}
     app.notebook = FakeNotebook([s.label for s in app.stages.values()])
     app._unlocked = {"hardware"}
+    app.parent_of = {}
     app._done = set()
     app._progress_last = 0.0
     app.pump = FakePump()
@@ -220,13 +221,16 @@ def main():
     check("an unknown stage is ignored rather than raising",
           "nonexistent" in app._done, False)
 
+    # Unlocking used to tick the stage before it, and a build unlocks three
+    # stages at once -- so the USB map was ticked before it had been opened.
+    # A stage is ticked when its own work is done, never by unlocking.
     app = make_app(app_module)
     app.unlock("smbios")
-    check("unlocking a stage ticks the one before it",
-          app.notebook.labels[1], "%s 2 - macOS" % app_module.DONE_MARK)
-    check("but not the one just unlocked", app.notebook.labels[2], "3 - SMBIOS")
+    check("unlocking a stage ticks nothing",
+          (app.notebook.labels[1], app.notebook.labels[2], len(app._done)),
+          ("2 - macOS", "3 - SMBIOS", 0))
     app.unlock("smbios")
-    check("unlocking again changes nothing", len(app._done), 1)
+    check("unlocking again changes nothing", len(app._done), 0)
 
     # -- bytes, counted for real --------------------------------------------
     payload = scratch / "media"

@@ -4,9 +4,19 @@ Every delivered build gets its own version, so you can always tell which one
 you are running: it is in the title bar, in `OpCoreForge.exe --version`, at the
 top of `--self-test`, and in the release zip's filename.
 
-## 2.0.1 - 2026-10-20
+## 2.1.1 - 2026-10-20
 
 - Fix a refused machine stopping without saying why. Since 1.3.2 the compatibility step runs upstream's GPU check silently, so when the NullMoth driver was declined for a Turing+ card - the only GPU - upstream's reason never reached the screen and the stop dialog opened on the start of the compatibility listing, with only a vague 'No GPU here can run macOS as configured' at the bottom. It now prints a plain reason naming the card ('macOS has no driver for NVIDIA GeForce GTX 1660 Ti, and macOS cannot be installed without a supported GPU'), carries it on the abort as WorkflowAborted.explanation, and the stop dialog's headline and the stage 1 banner lead with it; the report pane scrolls to it. Upstream's 'do NOT spam my inbox' text still never appears. tools/test_unsupported.py checks all three places
+
+## 2.1.0 - 2026-10-20
+
+- Ten tabs become six. macOS, SMBIOS, ACPI and Kexts are one "Configure" stage: the release on top with one line saying what it chose, and the other three as optional review tabs underneath (still reachable by their own keys, so nothing that navigates to them changed). "Finish" is folded into "Install media", where its checklist - BIOS settings, the EFI check, what to do after the install - sits with the step that actually makes the stick, and its manual "copy the EFI to a stick" instructions are gone. config.plist is marked optional and no longer has to be saved before the install media unlocks
+- Install media: "Download recovery" and "Prepare the folder" are one button, "Get macOS and prepare", which skips the download when the recovery on disk is already for the chosen Mac model
+- Ticks mean done. Unlocking a stage used to tick the one before it, and a build unlocks three stages at once, so the USB map and config.plist were ticked the moment the EFI was built. Each stage now ticks itself when its own work finishes. Every stage has a "Next" button, enabled once the next stage is unlocked
+- One message about OC Snapshot instead of three that disagreed: the USB stage updates config.plist itself, so the editor says nothing there is required, rather than warning that a snapshot must be run
+- The config.plist editor is inside the stage 8 tab on Windows again. ProperTree's document window is now created inside a -container frame with -use - Tk's own way of hosting one top-level in another - instead of being demoted from a top-level with wm forget, the step the access violations on Windows all followed. The titlebar tinting skips the embedded window by its flag, since a container-held window still reports 'wm' as its manager. If it does not survive on a machine, the existing marker still catches it and the next start uses a window of its own; 'Own window' still switches by hand. tools/test_embed.py now runs both methods
+- Stage 10 can write to USB hard drives and external SSDs, behind a 'List USB hard drives' box as in Rufus. Drives are now offered by the bus Windows reports (MSFT_Disk), so UAS enclosures that call themselves SCSI are found, and only ever USB ones: SATA, NVMe, SAS, RAID and SD/MMC-bus disks are never listed and are refused whatever is ticked. Also refused: the disk Windows boots from or keeps its system partition on, and any disk with a Windows installation on a partition. Erasing a hard drive asks a second time and lists every partition on it
+- Fix writing to any drive larger than 32 GB: Windows will not format FAT32 that large, so the media now gets a 16 GB partition there and the rest is left unallocated. Fix copying the media onto the wrong drive when two sticks labelled OPENCORE are plugged in: the new volume is now found on the disk that was just formatted, not by its label
 
 ## 2.0.0 - 2026-10-20
 

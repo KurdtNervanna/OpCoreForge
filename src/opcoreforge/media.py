@@ -82,7 +82,7 @@ DORTANIA_BUILDS = ("https://raw.githubusercontent.com/dortania/build-repo/"
 def _opencorepkg_url(github, fetcher):
     """The OpenCorePkg RELEASE zip, from the build index first.
 
-    Stage 6 already downloads OpenCorePkg through Dortania's build index, so
+    The build stage already downloads OpenCorePkg through Dortania's build index, so
     that path is known to work on a machine that has got this far. The GitHub
     release page is the fallback -- and it is scraped rather than served as
     JSON, so its entries carry ``product_name`` and a download ``url`` rather
@@ -350,7 +350,29 @@ def download_recovery(paths, board_id: str, report=None,
             "tool output pane has what macrecovery reported.")
     size = (destination / "BaseSystem.dmg").stat().st_size
     say("Recovery downloaded (%.1f GB)" % (size / 1024 ** 3))
+    try:
+        board_marker(paths).write_text(board_id, encoding="utf-8")
+    except OSError:
+        pass
     return destination
+
+
+def board_marker(paths) -> Path:
+    return recovery_dir(paths).parent / "board.txt"
+
+
+def downloaded_board(paths) -> str:
+    """The board id the recovery on disk was downloaded for, if it is there.
+
+    Lets "get macOS and prepare" skip a 3 GB download it has already done,
+    and only that: a different Mac model means a different macOS from Apple.
+    """
+    if not (recovery_dir(paths) / "BaseSystem.dmg").exists():
+        return ""
+    try:
+        return board_marker(paths).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -391,7 +413,7 @@ def stage_media(paths, report=None, progress=None) -> Path:
     if not efi.exists():
         raise MediaError(
             "There is no EFI folder to put on the media.",
-            "Build it in stage 6 first; the installer needs OpenCore as well "
+            "Build it in stage 3 first; the installer needs OpenCore as well "
             "as the recovery.")
     recovery = recovery_dir(paths)
     if not (recovery / "BaseSystem.dmg").exists():

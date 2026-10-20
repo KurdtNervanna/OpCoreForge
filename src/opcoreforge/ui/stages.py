@@ -220,10 +220,14 @@ class HardwareStage(Stage):
             # reason on screen rather than only in a dialog that gets dismissed.
             self._set_report_text(getattr(exc, "screen", "") or
                                   self.app.ocs.bridge.current_screen())
+            # The reason is printed last, under the whole listing.
+            self.report_text.see("end")
+            explanation = getattr(exc, "explanation", "")
             self.banner.show(
-                "OpCore-Simplify stopped: this hardware cannot be used as it "
-                "is. The reason is shown below. You can import a different "
-                "report, or change the machine and detect again.", "bad")
+                "OpCore-Simplify stopped: %s You can import a different "
+                "report, or change the machine and detect again." % (
+                    explanation or "this hardware cannot be used as it is. "
+                                   "The reason is shown below."), "bad")
 
         self.app.run_stage("Checking compatibility", work, done,
                            on_abort=stopped)

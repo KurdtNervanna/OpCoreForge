@@ -4,6 +4,10 @@ Every delivered build gets its own version, so you can always tell which one
 you are running: it is in the title bar, in `OpCoreForge.exe --version`, at the
 top of `--self-test`, and in the release zip's filename.
 
+## 2.1.1 - 2026-10-20
+
+- Fix a refused machine stopping without saying why. Since 1.3.2 the compatibility step runs upstream's GPU check silently, so when the NullMoth driver was declined for a Turing+ card - the only GPU - upstream's reason never reached the screen and the stop dialog opened on the start of the compatibility listing, with only a vague 'No GPU here can run macOS as configured' at the bottom. It now prints a plain reason naming the card ('macOS has no driver for NVIDIA GeForce GTX 1660 Ti, and macOS cannot be installed without a supported GPU'), carries it on the abort as WorkflowAborted.explanation, and the stop dialog's headline and the stage 1 banner lead with it; the report pane scrolls to it. Upstream's 'do NOT spam my inbox' text still never appears. tools/test_unsupported.py checks all three places
+
 ## 2.1.0 - 2026-10-20
 
 - Ten tabs become six. macOS, SMBIOS, ACPI and Kexts are one "Configure" stage: the release on top with one line saying what it chose, and the other three as optional review tabs underneath (still reachable by their own keys, so nothing that navigates to them changed). "Finish" is folded into "Install media", where its checklist - BIOS settings, the EFI check, what to do after the install - sits with the step that actually makes the stick, and its manual "copy the EFI to a stick" instructions are gone. config.plist is marked optional and no longer has to be saved before the install media unlocks

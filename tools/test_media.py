@@ -347,6 +347,45 @@ def main():
         except usbwriter.UnsafeTarget as refused:
             check("%s is refused" % label, bool(refused.hint), True)
 
+    # Not on USB means never, whatever the caller allows -- including the
+    # "List USB hard drives" box, which only ever adds USB disks.
+    never = {
+        "an NVMe disk": usbwriter.Disk(3, "Samsung 990 PRO", 1024 ** 4, False,
+                                       "SCSI", ["D:"], bus="NVMe"),
+        "a SATA disk": usbwriter.Disk(4, "Crucial MX500", 1024 ** 4, False,
+                                      "IDE", ["E:"], bus="SATA"),
+        "a card in a PCIe reader (eMMC shares its bus)":
+            usbwriter.Disk(5, "SD Card", 64 * 1024 ** 3, True, "SCSI", ["F:"],
+                           bus="SD"),
+        "a USB disk Windows boots from":
+            usbwriter.Disk(6, "Windows To Go", 128 * 1024 ** 3, False, "SCSI",
+                           ["G:"], bus="USB", system=True),
+        "a USB disk with Windows installed on it":
+            usbwriter.Disk(7, "Old laptop drive", 500 * 1024 ** 3, False,
+                           "USB", ["H:", "I:"], windows=("I:",)),
+    }
+    for label, disk in never.items():
+        try:
+            usbwriter.check_target(disk, allow_hard_drives=True)
+            RESULTS.append(("FAIL", "%s is refused, even with hard drives "
+                            "allowed" % label, "no exception"))
+        except usbwriter.UnsafeTarget as refused:
+            check("%s is refused, even with hard drives allowed" % label,
+                  bool(refused.hint), True)
+
+    usb_hdd = usbwriter.Disk(8, "Samsung T7", 1024 ** 4, False, "SCSI",
+                             ["J:"], bus="USB")
+    try:
+        usbwriter.check_target(usb_hdd)
+        got = None
+    except usbwriter.UnsafeTarget as refused:
+        got = refused.hint
+    check("a USB hard drive is refused unless they are listed",
+          got, lambda v: bool(v) and "List USB hard drives" in v)
+    check("and accepted once they are",
+          usbwriter.check_target(usb_hdd, allow_hard_drives=True), None)
+    check("it is described as a hard drive", usb_hdd.kind, "USB hard drive")
+
     # The system drive is refused even when everything else looks fine.
     system = os.environ.get("SystemDrive")
     os.environ["SystemDrive"] = "E:"
@@ -389,6 +428,17 @@ def main():
         check("it does %r" % required, required in script, True)
     check("and labels the volume OPENCORE",
           "label=OPENCORE" in script, True)
+    check("a 32 GB stick gets one partition across the whole stick",
+          "create partition primary\n" in script, True)
+    big_stick = usbwriter.Disk(9, "SanDisk 128GB", 128 * 1024 ** 3, True,
+                               "USB", [])
+    check("anything bigger gets a 16 GB one, since Windows will not format "
+          "FAT32 past 32 GB",
+          "create partition primary size=16384"
+          in usbwriter.diskpart_script(big_stick), True)
+    check("a USB hard drive only gets a script when they are allowed",
+          "select disk 8" in usbwriter.diskpart_script(
+              usb_hdd, allow_hard_drives=True), True)
     for disk in refusals.values():
         try:
             usbwriter.diskpart_script(disk)
@@ -416,33 +466,94 @@ def main():
           good.label(), "Disk 2 - SanDisk Ultra USB - 32.0 GB (E:)")
 
     # -- enumeration ---------------------------------------------------------
-    class FakeDrive:
-        def __init__(self, index, model, size, media_type, interface):
-            self.Index, self.Model, self.Size = index, model, size
-            self.MediaType, self.InterfaceType = media_type, interface
+    class Node:
+        def __init__(self, children=(), **values):
+            self.__dict__.update(values)
+            self.children = list(children)
 
         def associators(self, _name):
-            return []
+            return self.children
+
+    def volume(letter, label, size, free):
+        return Node(DeviceID=letter, VolumeName=label, Size=size,
+                    FreeSpace=free)
+
+    def drive(index, model, size, media, interface, pnp="", volumes=()):
+        return Node([Node(list(volumes))], Index=index, Model=model,
+                    Size=size, MediaType=media, InterfaceType=interface,
+                    PNPDeviceID=pnp)
+
+    GB = 1024 ** 3
+    drives = [
+        drive(0, "Samsung SSD 970", 500 * GB, "Fixed hard disk media",
+              "SCSI", volumes=[volume("C:", "Windows", 500 * GB, 100 * GB)]),
+        drive(1, "SanDisk Cruzer", 16 * GB, "Removable Media", "USB",
+              "USBSTOR\\DISK&VEN_SANDISK"),
+        drive(2, "WD Elements", 2048 * GB, "External hard disk media", "USB",
+              "USBSTOR\\DISK&VEN_WD",
+              [volume("E:", "Backups", 2048 * GB, 1024 * GB)]),
+        # UAS: Win32_DiskDrive says SCSI, the storage API says USB.
+        drive(3, "Samsung T7", 1024 * GB, "Fixed hard disk media", "SCSI",
+              "SCSI\\DISK&VEN_SAMSUNG"),
+        drive(4, "Crucial MX500", 1024 * GB, "Fixed hard disk media", "SCSI"),
+        drive(5, "SD Card", 64 * GB, "Removable Media", "SCSI"),
+        drive(6, "Old laptop drive", 500 * GB, "External hard disk media",
+              "USB", "USBSTOR\\DISK&VEN_WDC",
+              [volume("F:", "", 500 * GB, 300 * GB)]),
+    ]
+    buses = {0: (17, True), 1: (7, False), 2: (7, False), 3: (7, False),
+             4: (11, False), 5: (12, False), 6: (7, False)}
 
     class FakeWmi:
-        def WMI(self):
+        def __init__(self, storage=True):
+            self.storage = storage
+
+        def WMI(self, namespace=None):
+            if namespace and not self.storage:
+                raise RuntimeError("no Storage API on this Windows")
             return self
 
-        def Win32_DiskDrive(self):
-            return [
-                FakeDrive(0, "Samsung SSD 970", 500 * 1024 ** 3,
-                          "Fixed hard disk media", "SCSI"),
-                FakeDrive(1, "SanDisk Cruzer", 16 * 1024 ** 3,
-                          "Removable Media", "USB"),
-                FakeDrive(2, "WD Elements", 2 * 1024 ** 4,
-                          "External hard disk media", "USB"),
-            ]
+        def Win32_DiskDrive(self, Index=None):
+            return [d for d in drives if Index is None or d.Index == Index]
 
-    found = usbwriter.list_disks(wmi_module=FakeWmi())
-    check("fixed internal disks are not even offered",
-          [d.index for d in found], [1, 2])
+        def MSFT_Disk(self):
+            return [Node(Number=n, BusType=b, IsBoot=s, IsSystem=False)
+                    for n, (b, s) in buses.items()]
+
+    def windows_on(letter):
+        return letter == "F:"
+
+    found = usbwriter.list_disks(wmi_module=FakeWmi(), has_windows=windows_on)
+    check("by default only USB sticks are offered",
+          [d.index for d in found], [1])
     check("a USB stick is described for a human",
           found[0].label(), lambda v: "SanDisk Cruzer" in v and "16.0 GB" in v)
+    found = usbwriter.list_disks(wmi_module=FakeWmi(), include_hard_drives=True,
+                                 has_windows=windows_on)
+    check("listing USB hard drives adds them, UAS ones included - and nothing "
+          "internal, ever", [d.index for d in found], [1, 2, 3, 6])
+    by_index = {d.index: d for d in found}
+    check("a hard drive's volumes are named for the confirmation",
+          by_index[2].contents(), ["E:  Backups  -  2048.0 GB, 1024.0 GB used"])
+    check("Windows on a USB drive is noticed", by_index[6].windows, ("F:",))
+    try:
+        usbwriter.check_target(by_index[6], allow_hard_drives=True)
+        got = None
+    except usbwriter.UnsafeTarget as refused:
+        got = refused.message
+    check("and that drive is refused", got,
+          lambda v: bool(v) and "Windows installed" in v)
+    found = usbwriter.list_disks(wmi_module=FakeWmi(storage=False),
+                                 include_hard_drives=True,
+                                 has_windows=windows_on)
+    check("without the storage API the interface decides, which only ever "
+          "offers less", [d.index for d in found], [1, 2, 6])
+
+    # -- after formatting, the letter comes from the disk that was formatted --
+    check("the new volume is found on the disk just formatted",
+          usbwriter._new_letter(2, wmi_module=FakeWmi(), tries=1), "E:")
+    check("not on some other drive",
+          usbwriter._new_letter(1, wmi_module=FakeWmi(), tries=1), None)
 
     STDERR.write("\n")
     for status, label, value in RESULTS:

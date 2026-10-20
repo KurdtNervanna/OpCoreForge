@@ -10,10 +10,10 @@ USB map from stage 7 take effect.
 
 from __future__ import annotations
 
-import os
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from ..bridge.propertree import embed_method
 from . import theme
 from .stages import Stage
 from .widgets import Banner, Card, KeyValue
@@ -44,12 +44,13 @@ class ConfigStage(Stage):
     def survey_last_attempt(self) -> bool:
         """Did the previous run die while the editor was coming up?
 
-        Embedding a whole second Tk application into a tab means demoting its
-        window with ``wm forget``, and that has faulted inside Tk's own code on
-        at least one machine -- an access violation, which no amount of Python
-        error handling can catch. Rather than leave someone with an
-        application that dies every time they reach stage 8, the attempt is
-        recorded and a repeat opens the editor in its own window instead.
+        Embedding a whole second Tk application into a tab reaches past what
+        most Tk programs do, and the older way of doing it (``wm forget``)
+        faulted inside Tk's own code on at least one machine -- an access
+        violation, which no amount of Python error handling can catch. Rather
+        than leave someone with an application that dies every time they
+        reach stage 8, the attempt is recorded and a repeat opens the editor
+        in its own window instead.
         """
         marker = self._marker()
         try:
@@ -67,23 +68,24 @@ class ConfigStage(Stage):
     def _wants_embedding(self) -> bool:
         """Where the editor should open, unless the person has said otherwise.
 
-        Windows gets its own window by default. Embedding demotes ProperTree's
-        window with ``wm forget``, and on the machine this was reported from
-        that faulted inside Tk itself -- three times, in three different calls,
-        every one of them while the first document was being opened, and each
-        after a fix that removed the previous one. There is no Python error to
-        catch and no Tk version to require.
+        In the tab, everywhere. On Windows the editor used to open in its own
+        window by default, because demoting ProperTree's window with
+        ``wm forget`` faulted inside Tk itself on the machine this was reported
+        from -- three times, in three different calls, every one while the
+        first document was being opened. The tab now holds it the way Tk
+        itself provides for (a ``-container`` frame the window is created in,
+        see ``bridge.propertree.embed_method``), which never converts a window
+        after the fact.
 
-        A separate window is how ProperTree runs on its own, so it is the
-        configuration with millions of hours behind it. The tab is a nicety;
-        the editor working is not. "Own window" on the toolbar overrides this
-        in either direction.
+        If that does not survive on a machine either, the marker written in
+        ``_start_editor`` catches it and the next start uses a window of its
+        own. "Own window" on the toolbar overrides this in either direction.
         """
         if self._crashed_before:
             return False
         stored = self.app.paths.read_state().get("editor_windowed")
         if stored is None:
-            return os.name != "nt"
+            return True
         return not bool(stored)
 
     def build(self):
@@ -203,7 +205,8 @@ class ConfigStage(Stage):
         except Exception:
             pass
         try:
-            note("editor", "constructing ProperTree (embedded=%s)" % embed)
+            note("editor", "constructing ProperTree (embedded=%s, method=%s)"
+                 % (embed, embed and embed_method(self.app.root)))
             # Nothing of ours runs while ProperTree pumps the loop -- and it
             # pumps it repeatedly, from its constructor and again while it
             # populates the tree. Its windows are being re-parented and a log

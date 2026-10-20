@@ -106,21 +106,29 @@ class MediaStage(Stage):
         self.media_summary.pack(fill="x", pady=(10, 0))
 
         # -- 3. USB ---------------------------------------------------------
-        step3 = Card(body, "3. Write a USB stick  (erases it completely)")
+        step3 = Card(body, "3. Write a USB drive  (erases it completely)")
         step3.pack(fill="x", pady=(0, 12))
         row3 = ttk.Frame(step3.body, style="Card.TFrame")
         row3.pack(fill="x")
         ttk.Button(row3, text="Rescan drives", style="Small.TButton",
                    command=self._rescan).pack(side="left")
+        # As in Rufus: hard drives are hidden until asked for. Only ever USB
+        # ones -- internal SATA and NVMe disks are never listed by anything.
+        self.list_hard_drives = tk.BooleanVar(value=False)
+        ttk.Checkbutton(row3, text="List USB hard drives",
+                        variable=self.list_hard_drives,
+                        style="Card.TCheckbutton",
+                        command=self._rescan).pack(side="left", padx=(14, 0))
         self.usb_note = ttk.Label(step3.body, style="CardMuted.TLabel",
                                   wraplength=880, justify="left", text="")
         self.usb_note.pack(anchor="w", pady=(8, 0))
         self.disk_table = CheckTable(
             step3.body,
             columns=[("mark", "", 40, "center"),
-                     ("drive", "Removable drive", 420, "w"),
-                     ("size", "Size", 110, "center"),
-                     ("letters", "Currently", 160, "w")],
+                     ("drive", "USB drive", 380, "w"),
+                     ("kind", "Type", 130, "w"),
+                     ("size", "Size", 100, "center"),
+                     ("letters", "Currently", 140, "w")],
             on_toggle=self._pick_disk, height=4)
         self.disk_table.pack(fill="x", pady=(8, 0))
         self.write_button = ttk.Button(step3.body, text="Erase and write",
@@ -304,7 +312,8 @@ class MediaStage(Stage):
 
     def _rescan(self):
         try:
-            self._disks = usbwriter.list_disks()
+            self._disks = usbwriter.list_disks(
+                include_hard_drives=self.list_hard_drives.get())
         except Exception as exc:
             self._disks = []
             self.usb_note.configure(
@@ -315,14 +324,25 @@ class MediaStage(Stage):
         for disk in self._disks:
             self.disk_table.add_row(
                 str(disk.index),
-                ["", disk.model, "%.1f GB" % disk.size_gb,
+                ["", disk.model, disk.kind, "%.1f GB" % disk.size_gb,
                  ", ".join(disk.letters) or "no letter"],
                 tags=("normal",))
-        if not self._disks and os.name == "nt":
-            self.usb_note.configure(
-                text="No removable drives found. Plug the USB stick in and "
-                     "press Rescan. Only removable drives are listed - a "
-                     "fixed disk is never offered, whatever it is.")
+        if os.name == "nt":
+            if not self._disks:
+                self.usb_note.configure(
+                    text="No USB drives found. Plug the stick in and press "
+                         "Rescan. Only drives connected over USB are ever "
+                         "listed - internal SATA and NVMe disks are never "
+                         "offered, whatever is ticked.")
+            elif self.list_hard_drives.get():
+                self.usb_note.configure(
+                    text="USB hard drives are listed too. Erasing one erases "
+                         "every partition on it. Internal disks are never "
+                         "listed.")
+            else:
+                self.usb_note.configure(
+                    text="USB sticks are listed. Tick \"List USB hard drives\" "
+                         "for an external SSD or hard drive.")
         self._refresh_summary()
 
     def _pick_disk(self, item):
@@ -335,7 +355,7 @@ class MediaStage(Stage):
             chosen = disk is self._selected_disk
             self.disk_table.add_row(
                 str(disk.index),
-                ["*" if chosen else "", disk.model,
+                ["*" if chosen else "", disk.model, disk.kind,
                  "%.1f GB" % disk.size_gb,
                  ", ".join(disk.letters) or "no letter"],
                 tags=("selected" if chosen else "normal",))
@@ -346,8 +366,9 @@ class MediaStage(Stage):
         if disk is None:
             self.banner.show("Choose the USB stick to write to first.", "warn")
             return
+        allow = self.list_hard_drives.get()
         try:
-            usbwriter.check_target(disk)
+            usbwriter.check_target(disk, allow_hard_drives=allow)
         except usbwriter.UnsafeTarget as refused:
             self.banner.show("%s %s" % (refused.message, refused.hint), "bad")
             return
@@ -361,22 +382,39 @@ class MediaStage(Stage):
                 "media copied onto it.\n\nContinue?" % disk.label(),
                 parent=self.app.root, icon="warning", default="no"):
             return
+        if disk.hard_drive and not messagebox.askyesno(
+                "Erase a whole hard drive?",
+                "%s is a hard drive, not a USB stick.\n\nEvery partition on "
+                "it is erased, not just one:\n\n    %s\n\nAnything on it that "
+                "is not backed up somewhere else will be gone. Erase it?"
+                % (disk.label(),
+                   "\n    ".join(disk.contents()) or "(no partitions with a "
+                                                   "drive letter)"),
+                parent=self.app.root, icon="warning", default="no"):
+            return
 
         label = disk.label()
         media_path = media_module.media_dir(self.app.paths)
         self.app.session_log.note("usb", "erasing %s" % label)
         self.app.session_log.note("usb", "diskpart script:\n"
-                                  + usbwriter.diskpart_script(disk))
+                                  + usbwriter.diskpart_script(
+                                      disk, allow_hard_drives=allow))
 
         def done(letter):
             self._rescan()
             self.app.mark_done(self.key)
+            rest = ""
+            if disk.size > usbwriter.FAT32_LIMIT:
+                rest = (" The media uses a 16 GB partition, since Windows "
+                        "will not format FAT32 any larger; the rest of the "
+                        "drive is unallocated and can be given a partition "
+                        "of its own in Disk Management.")
             self.banner.show(
                 "Done. Written to %s and flushed, so the drive is safe to "
                 "remove. Boot the target machine from it and pick \"macOS "
                 "Base System\" in the OpenCore picker. If the picker looks "
                 "empty, press Space - that reveals auxiliary entries, and "
-                "macOS Recovery is one." % letter, "good")
+                "macOS Recovery is one.%s" % (letter, rest), "good")
             messagebox.showinfo(
                 "USB stick ready",
                 "The install media is written to %s and safe to unplug.\n\n"
@@ -387,7 +425,8 @@ class MediaStage(Stage):
             "Writing the USB stick",
             lambda: usbwriter.write_media(disk, media_path, confirm=label,
                                           report=self.app.report,
-                                          progress=self.app.progress),
+                                          progress=self.app.progress,
+                                          allow_hard_drives=allow),
             done)
 
     def _build_iso(self):

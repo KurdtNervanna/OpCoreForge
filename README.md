@@ -129,7 +129,7 @@ Ten tabs, unlocked as their inputs appear.
 | 5 Kexts | OpCore-Simplify | All 88 kexts by category, with upstream's `R / x / ! / ? / -` status markers. |
 | 6 Build EFI | OpCore-Simplify | Downloads OpenCore + kexts, applies patches, generates config.plist, writes the EFI. |
 | 7 USB map | USBToolBox | Live port discovery, connector types, comments; builds `UTBMap.kext` **and installs it into the EFI, removing `UTBDefault.kext` and rewriting `Kernel -> Add` to match**. |
-| 8 config.plist | ProperTree | The full editor. On Windows it opens in its own window (see below); OC Snapshot already knows which OC folder to scan. |
+| 8 config.plist | ProperTree | The full editor, inside the tab (with its own window as the fallback, see below); OC Snapshot already knows which OC folder to scan. |
 | 9 Finish | — | BIOS settings to change, how to deploy, what is still outstanding; checks the EFI against its own `config.plist`. |
 | 10 Install media | — | Downloads a macOS recovery and puts it with the EFI: a folder, a bootable USB, or an ISO for a VM. Adds the companion app for after the install. |
 
@@ -200,11 +200,28 @@ Three outputs, all from one folder so the safe path always exists:
 - **The folder.** `OpCoreForge_Data\InstallMedia` holds `EFI\`,
   `com.apple.recovery.boot\` and `OpCoreForge\`. Format a USB stick as FAT32
   and copy all three across; that is the whole procedure.
-- **The USB.** The only thing here that can destroy data, so: removable drives
-  only, never disk 0, never a disk holding the system drive, and the drive has
-  to be named back in the confirmation before anything runs. The `diskpart`
-  script is built by a pure function, logged before it executes, and asserted
-  on in tests without a disk present.
+- **The USB.** The only thing here that can destroy data, so:
+  - **USB drives only**, decided by the bus Windows reports the disk on, not
+    by what the drive says about itself. Internal SATA, NVMe, SAS and RAID
+    disks are never listed and are refused if one is passed in anyway; no
+    setting changes that. (A card in a built-in reader is offered when the
+    reader is USB-attached, as many are, and not when it sits on the SD/MMC
+    bus — which is also where eMMC laptops keep Windows.)
+  - **USB sticks by default.** USB hard drives and external SSDs appear when
+    **List USB hard drives** is ticked, as in Rufus, including UAS enclosures
+    that report themselves as SCSI. Erasing one asks a second time and lists
+    every partition on it, with its label and how much is in use.
+  - **Never** disk 0, the disk Windows boots from or keeps its system
+    partition on, a disk holding the system or program drive, or a disk with
+    a Windows installation on any partition (Windows To Go lives on USB).
+  - The drive has to be named back in the confirmation before anything runs,
+    and after formatting the new volume is found on *that* disk — not by
+    searching for its label, which a second OpenCore stick would also carry.
+  - Windows will not format FAT32 past 32 GB, so on a larger drive the media
+    gets a 16 GB partition and the rest is left unallocated.
+
+  The `diskpart` script is built by a pure function, logged before it
+  executes, and asserted on in tests without a disk present.
 - **The ISO.** For VMs. A UEFI machine boots an ISO through an El Torito
   catalog entry pointing at a FAT image the firmware mounts as an EFI System
   Partition, so the media goes into a FAT32 image — written from scratch,
@@ -387,10 +404,13 @@ let it live in a notebook tab with everything intact:
   scatter them across the UI. `tkinter.Tk` is briefly redirected to return a
   dedicated hidden `Toplevel` instead — which is also exactly what Ctrl+T then
   shows. Its `mainloop()` call is suppressed so control returns.
-- **`wm forget`.** The document window is created as a child of the tab frame
-  and then demoted from top-level to an ordinary managed widget. It keeps its
-  widgets, bindings and state; only the window manager stops handling it. Every
-  `wm` method then raises, so the ones ProperTree calls are shimmed.
+- **A container frame.** The tab holds a frame created with `-container`, and
+  ProperTree's document window is *created inside it* with `-use` — Tk's own
+  mechanism for hosting one top-level inside another, on Windows and X11. Tk
+  sizes the window to the frame; the window-manager calls ProperTree makes on
+  it are ignored, and the two that misbehave (withdraw, deiconify) are
+  shimmed. Where Tk has no containers (macOS), the older route is used: the
+  window is created as a child of the tab and demoted with `wm forget`.
 - **A redirected `stackorder`.** Every ProperTree menu command resolves its
   target with `stackorder(...)[-1]`, and `wm stackorder` cannot see a forgotten
   window — so without this override, Ctrl+R and friends would silently do
@@ -398,33 +418,29 @@ let it live in a notebook tab with everything intact:
 - **No titlebar tinting on the embedded window.** ProperTree keeps its window
   titlebars in step with the system dark mode by handing each window's handle
   to `DwmSetWindowAttribute`. That API is defined for top-level windows only;
-  the embedded document is a child frame, and passing its handle faults inside
+  the embedded document is a child window, and passing its handle faults inside
   `dwmapi` — an access violation, so upstream's `except:` never sees it and the
-  process simply dies. `winfo_manager()` distinguishes the two (`"wm"` versus
-  the geometry manager holding it), so the real top-levels keep the feature.
+  process simply dies. The embedded window is marked as such and skipped (a
+  container-held window still *reports* `"wm"` as its manager, so that alone
+  is not enough), and the real top-levels keep the feature.
 
-**And, on Windows, a decision not to.** Embedding a whole second Tk
-application is the one part of this that reaches past what Tk supports, and on
-the machine this was reported from it faulted inside Tk's own code three times
-— in three different calls, every one while the first document was being
-opened, each after a fix that removed the previous one. An access violation is
-not a Python exception: there is nothing to catch and the process simply
-vanishes.
+**Why a container, and what happens if it still fails.** Up to 1.3 the
+editor was demoted with `wm forget` on Windows too, and on the machine this was
+reported from that faulted inside Tk's own code three times — in three
+different calls, every one while the first document was being opened, each
+after a fix that removed the previous one. An access violation is not a Python
+exception: there is nothing to catch and the process simply vanishes. So
+Windows opened the editor in its own window instead. A container frame never
+converts a window after the fact, which is the step those faults all followed,
+so from 2.1 the tab is the default on Windows again.
 
-So on Windows the editor opens in its own window by default. That is how
-ProperTree runs on its own, which is the configuration with millions of hours
-behind it. The tab is a nicety; the editor working is not.
-
-Everything that makes it part of OpCoreForge is unchanged — the same
-document, the same toolbar, OC Snapshot still pointed at the EFI stage 6 built
-— only the tab is replaced by a panel explaining where it went. The **Own
-window** checkbox on stage 8 switches between the two and is remembered.
-
-Embedding is still there and still tested, and it is the default everywhere
-else. If it is turned on and does not survive, that is caught too: a marker
-file is written just before the editor is built and removed once it is up, so
-a run that dies is noticed on the next launch and the window is used instead,
-with the reason on screen.
+The window remains the safety net. A marker file is written just before the
+editor is built and removed once it is up, so a run that dies is noticed on the
+next launch and the editor opens in its own window instead, with the reason on
+screen. Everything that makes it part of OpCoreForge is the same either way —
+the same document, the same toolbar, OC Snapshot still pointed at the EFI
+stage 6 built. The **Own window** checkbox on stage 8 switches between the two
+and is remembered.
 
 Its self-updater is removed: it spawns `sys.executable Scripts/update_check.py`
 through `multiprocessing`, and inside a one-file build `sys.executable` is
@@ -524,7 +540,7 @@ Verified against:
 python tools/make_fixture.py      # synthetic Comet Lake report + compiled DSDT
 python tools/test_workflow.py     # 49 checks: report -> EFI -> USB map -> snapshot
 python tools/test_gui.py          # 66 checks driving the real window, with screenshots
-python tools/test_embed.py        # 33 checks on the ProperTree embedding
+python tools/test_embed.py        # 2 x 37 checks: the ProperTree embedding, container and wm forget
 python tools/test_editor_window.py # 18 checks on the editor as its own window
 python tools/test_unsupported.py  # 13 checks: a refusal must be visible, not silent
 python tools/test_nvidia_driver.py # 21 checks: NullMoth NVIDIA driver on Sequoia
@@ -534,7 +550,7 @@ python tools/test_diagnostics.py  # 76 checks: session log, frozen paths, COM, e
 python tools/test_pump.py         # 21 checks: the pump under a nested event loop
 python tools/test_fatimage.py     # 27 checks: the FAT32 writer, read back by mtools
 python tools/test_isoimage.py     # 18 checks: the ISO's UEFI boot chain, byte by byte
-python tools/test_media.py        # 78 checks: boards, the recovery pipeline, every USB refusal
+python tools/test_media.py        # 96 checks: boards, the recovery pipeline, every USB refusal
 python tools/test_companion.py    # 85 checks: macOS disks, the root install script run for real, the media
 python tools/test_eficheck.py     # 53 checks: config.plist must not name a file the EFI lacks
 python tools/test_progress.py     # 45 checks: progress, elapsed time, completion marks

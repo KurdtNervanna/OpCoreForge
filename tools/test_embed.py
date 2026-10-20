@@ -1,5 +1,13 @@
-"""Smoke test: does ProperTree really embed into a notebook tab?"""
+"""Smoke test: does ProperTree really embed into a notebook tab?
+
+Run without arguments it checks both ways of holding the editor in the tab --
+``container`` (a -container frame the window is created in; the default on
+Windows and X11) and then ``forget`` (the window demoted with wm forget) -- the
+second in a fresh process, since ProperTree can only be built once per
+interpreter. ``python tools/test_embed.py forget`` runs just one.
+"""
 import os
+import subprocess
 import sys
 import plistlib
 import tkinter as tk
@@ -48,8 +56,10 @@ toolbar.pack(fill="x")
 host = ttk.Frame(editor_tab)
 host.pack(fill="both", expand=True)
 
+METHOD = sys.argv[1] if len(sys.argv) > 1 else "container"
+
 pt = EmbeddedProperTree(P)
-pt.start(root, host)
+pt.start(root, host, method=METHOD)
 
 results = []
 
@@ -72,11 +82,27 @@ def check(label, fn, expect=None):
 
 
 def run():
+    # As someone reaching stage 8 would: the editor's tab is the one showing.
+    notebook.select(editor_tab)
+    root.update()
     check("window created", lambda: pt.window is not None)
-    check("window is embedded", lambda: pt.window.embedded)
+    check("window is embedded", lambda: pt.window.embedded, True)
+    check("held the way that was asked for",
+          lambda: (pt.method, pt.window.embed_method), (METHOD, METHOD))
     check("geometry manager", lambda: pt.window.winfo_manager())
-    check("parent is the tab host", lambda: pt.window.winfo_parent())
-    check("is mapped", lambda: bool(pt.window.winfo_ismapped()))
+    if METHOD == "container":
+        check("the tab holds a -container frame",
+              lambda: (pt._container.winfo_parent() == str(host),
+                       bool(int(pt._container.cget("container")))),
+              (True, True))
+    else:
+        check("parent is the tab host", lambda: pt.window.winfo_parent(),
+              str(host))
+    check("is mapped", lambda: bool(pt.window.winfo_ismapped()), True)
+    root.update()
+    check("it fills the tab",
+          lambda: abs(pt.window.winfo_width() - host.winfo_width()) <= 4
+          and pt.window.winfo_height() > 200, True)
     check("private root is a Toplevel",
           lambda: type(pt.pt_root).__name__)
     check("app root untouched (children)",
@@ -101,8 +127,11 @@ def run():
     # wm calls that upstream makes on windows must not explode
     check("lift_window survives", lambda: pt.pt.lift_window(pt.window) or "ok")
     check("withdraw shimmed", lambda: repr(pt.window.withdraw()))
+    check("deiconify shimmed", lambda: repr(pt.window.deiconify()))
     check("title shimmed", lambda: repr(pt.window.title("x")))
-    check("wm_state shimmed", lambda: pt.window.wm_state())
+    check("wm_state shimmed", lambda: pt.window.wm_state(), "normal")
+    check("still mapped after all that",
+          lambda: bool(pt.window.winfo_ismapped()), True)
 
     # editing operations
     check("toggle find pane", lambda: pt.toggle_find() or "ok")
@@ -162,8 +191,14 @@ def run():
     check("the titlebar tint is patched before construction",
           lambda: getattr(pt_app.ProperTree, "_ocf_titlebar_confined", False),
           True)
-    check("the embedded window is not owned by the window manager",
-          lambda: pt.window.winfo_manager(), lambda v: v not in ("wm", ""))
+    if METHOD == "forget":
+        check("the embedded window is not owned by the window manager",
+              lambda: pt.window.winfo_manager(), lambda v: v not in ("wm", ""))
+    else:
+        # A -use window still reports "wm" -- which is why the tint asks the
+        # embedded flag first. The checks below prove it skips this window.
+        check("a container-held window still says 'wm'",
+              lambda: pt.window.winfo_manager(), "wm")
     check("while a real top-level still is",
           lambda: root.winfo_manager(), "wm")
 
@@ -207,7 +242,12 @@ def run():
 root.after(300, run)
 root.mainloop()
 
+print("[%s]" % METHOD)
 print("\n".join(results))
 failed = [r for r in results if r.startswith("FAIL")]
 print("\n%d checks, %d failed" % (len(results), len(failed)))
-sys.exit(1 if failed else 0)
+code = 1 if failed else 0
+if len(sys.argv) == 1:
+    print()
+    code |= subprocess.call([sys.executable, __file__, "forget"])
+sys.exit(code)

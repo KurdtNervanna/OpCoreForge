@@ -273,7 +273,7 @@ def test_sources(scratch: Path):
     make_efi(stick)
     make_efi(stick / "OpCoreForge")
     (stick / "OpCoreForge" / "media.json").write_text(json.dumps(
-        {"opcoreforge": "1.4.0", "created": "2026-10-20T10:00:00"}))
+        {"opcoreforge": "2.0.0", "created": "2026-10-20T10:00:00"}))
     make_efi(volumes / "Old stick")
     (volumes / "Empty").mkdir()
     os.symlink("/", volumes / "Macintosh HD")
@@ -284,7 +284,7 @@ def test_sources(scratch: Path):
           [("built", "OpCoreForge"), ("media", "OPENCORE"),
            ("media", "Old stick")])
     check("sources: the as-built label says which OpCoreForge made it",
-          found[0].label, lambda s: "1.4.0" in s and "2026-10-20" in s)
+          found[0].label, lambda s: "2.0.0" in s and "2026-10-20" in s)
     check("sources: a folder holding EFI is taken as that EFI",
           installer.chosen_source(stick).path, stick / "EFI")
 
@@ -594,8 +594,8 @@ def test_media(scratch: Path):
         (recovery / name).write_bytes(b"recovery")
 
     check("the version's own release is tried before the latest",
-          media_companion.download_urls("1.4.0"),
-          lambda u: u[0].endswith("/download/v1.4.0/OpCoreForge-Companion.dmg")
+          media_companion.download_urls("2.0.0"),
+          lambda u: u[0].endswith("/download/v2.0.0/OpCoreForge-Companion.dmg")
           and u[1].endswith("/latest/download/OpCoreForge-Companion.dmg"))
 
     good = bytearray(4096)

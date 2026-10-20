@@ -58,6 +58,14 @@ you download, not OpCoreForge. The constants OpCoreForge writes into a
 `config.plist` (an NVRAM GUID, a `csr-active-config` value, a boot-args line, a
 kext identifier to block) are configuration facts, not the driver's code.
 
+## The companion app
+
+`OpCoreForge-Companion.dmg` contains none of the three projects above. It is
+OpCoreForge's own code frozen by PyInstaller with the Python runtime and Tcl/Tk
+it was built with (PSF License; Tcl/Tk's BSD-style licence) and `certifi`
+(MPL-2.0, unmodified; source at https://github.com/certifi/python-certifi),
+each under its own licence.
+
 ## OpCoreForge itself
 
 Everything outside `src/vendor/` — `src/opcoreforge/`, `src/compat/`,

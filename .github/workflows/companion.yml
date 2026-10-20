@@ -1,0 +1,91 @@
+name: Companion app (macOS)
+
+# Builds OpCoreForge Companion into a disk image on a Mac, which is the only
+# place it can be built. On a published release the image is attached to it,
+# which is where OpCoreForge's stage 10 downloads it from to put on the USB.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/opcoreforge/**"
+      - "src/Companion.py"
+      - "Companion.spec"
+      - "tools/test_companion.py"
+      - ".github/workflows/companion.yml"
+  pull_request:
+    paths:
+      - "src/opcoreforge/**"
+      - "src/Companion.py"
+      - "Companion.spec"
+      - "tools/test_companion.py"
+      - ".github/workflows/companion.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # Intel, because every machine OpCoreForge builds for is an Intel or AMD PC.
+    runs-on: macos-15-intel
+    env:
+      # python.org's own build: it targets macOS 10.9 and bundles Tk, so the
+      # app runs on every release OpCoreForge offers, back to High Sierra.
+      PYTHON_PKG: https://www.python.org/ftp/python/3.12.10/python-3.12.10-macos11.pkg
+      PY: /Library/Frameworks/Python.framework/Versions/3.12/bin/python3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python from python.org
+        run: |
+          curl -fsSLo python.pkg "$PYTHON_PKG"
+          sudo installer -pkg python.pkg -target /
+          "$PY" -c "import sysconfig, tkinter; print('deployment target', sysconfig.get_config_var('MACOSX_DEPLOYMENT_TARGET'), 'Tk', tkinter.TkVersion)"
+
+      - name: Install build tools
+        run: |
+          "$PY" -m pip install --upgrade pip
+          "$PY" -m pip install pyinstaller certifi pillow
+
+      - name: Run the companion tests
+        run: '"$PY" tools/test_companion.py'
+
+      - name: Build the app
+        run: '"$PY" -m PyInstaller --clean --noconfirm Companion.spec'
+
+      - name: Self-test the built app
+        run: '"dist/OpCoreForge Companion.app/Contents/MacOS/OpCoreForge Companion" --self-test'
+
+      - name: Make the disk image
+        run: |
+          mkdir -p dmg
+          ditto "dist/OpCoreForge Companion.app" "dmg/OpCoreForge Companion.app"
+          ln -s /Applications dmg/Applications
+          # hdiutil is known to fail now and then on hosted runners with
+          # "Resource busy"; a retry is all it needs.
+          for attempt in 1 2 3; do
+            hdiutil create -volname "OpCoreForge Companion" -srcfolder dmg \
+              -fs HFS+ -format UDZO -ov dist/OpCoreForge-Companion.dmg && break
+            sleep 5
+          done
+          test -f dist/OpCoreForge-Companion.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpCoreForge-Companion
+          path: dist/OpCoreForge-Companion.dmg
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$("$PY" -c "import sys; sys.path.insert(0, 'src'); from opcoreforge.version import __version__; print(__version__)")
+          if [ "$TAG" != "v$version" ]; then
+            echo "::warning::Release tag $TAG does not match version v$version. OpCoreForge $version looks for the companion under v$version, then falls back to the latest release."
+          fi
+          gh release upload "$TAG" dist/OpCoreForge-Companion.dmg --clobber

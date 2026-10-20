@@ -146,8 +146,11 @@ def make_app(app_module):
 def main():
     import time
 
-    from opcoreforge import fatimage, isoimage, media
+    from opcoreforge import fatimage, isoimage, media, media_companion
     from opcoreforge.ui import app as app_module
+
+    # No network here: the companion download is test_companion.py's subject.
+    media_companion.find_dmg = lambda *args, **kwargs: None
 
     scratch = Path(tempfile.mkdtemp(prefix="ocf-progress-"))
 

@@ -56,7 +56,11 @@ class FakePaths:
 
 
 def main():
-    from opcoreforge import media, usbwriter
+    from opcoreforge import media, media_companion, usbwriter
+
+    # Preparing the media also fetches the companion app from GitHub. That is
+    # tools/test_companion.py's subject; here it is simply not available.
+    media_companion.find_dmg = lambda *args, **kwargs: None
 
     scratch = Path(tempfile.mkdtemp(prefix="ocf-media-"))
     paths = FakePaths(scratch)

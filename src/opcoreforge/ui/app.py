@@ -31,6 +31,7 @@ from ..bridge import console as console_bridge
 from ..bridge.ocs import OcsController
 from ..bridge.propertree import EmbeddedProperTree
 from ..bridge.usbtoolbox import UsbController
+from . import credits as credits_window
 from . import prompt as prompt_ui
 from . import theme
 from .stages import (AcpiStage, BuildStage, HardwareStage, KextStage,
@@ -175,6 +176,9 @@ class App:
         ttk.Label(top, style="MutedApp.TLabel",
                   text="   OpCore-Simplify  +  USBToolBox  +  ProperTree"
                   ).pack(side="left", padx=(4, 0), pady=(8, 0))
+        ttk.Button(top, text="Credits", style="Small.TButton",
+                   command=lambda: credits_window.show(self.root, APP_TITLE)
+                   ).pack(side="right", padx=(12, 0), pady=(6, 0))
         self.data_label = ttk.Label(top, style="MutedApp.TLabel", text="")
         self.data_label.pack(side="right", pady=(8, 0))
 

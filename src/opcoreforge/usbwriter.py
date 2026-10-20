@@ -5,11 +5,17 @@ This is the only thing in OpCoreForge that can destroy data, so the rules are
 stricter than anywhere else and they are enforced here rather than in the
 dialog that calls it:
 
-- Removable drives only. A fixed disk is refused even if it is external, even
-  if it is empty, and there is no override.
-- Never disk 0, and never a disk holding the Windows drive or the folder
-  OpCoreForge is running from -- those are checked separately from
-  "removable", because a badly behaved enclosure can report either.
+- USB drives only, decided by the bus Windows reports the disk on -- not by
+  what the drive says about itself. SATA, NVMe, SAS and RAID disks are never
+  listed and are refused if one is passed in anyway; nothing overrides that.
+- USB *sticks* are offered by default. USB *hard drives* (fixed media on the
+  USB bus, which is what most external SSDs and enclosures are) only when the
+  caller asks for them -- the "List USB hard drives" box, as in Rufus.
+- Never disk 0, never the disk Windows marks as its boot or system disk, never
+  a disk holding the Windows drive or the folder OpCoreForge is running from,
+  and never a disk with a Windows installation on any of its partitions.
+  Those are checked separately from "USB", because a badly behaved enclosure
+  can report anything, and Windows To Go lives on USB disks.
 - The diskpart script is built by a pure function that runs no commands, so
   what will be executed can be read, logged and tested without a disk.
 - The caller has to pass the disk's identity back in ``confirm``. Passing the
@@ -32,6 +38,18 @@ from pathlib import Path
 MINIMUM_BYTES = 2 * 1024 ** 3
 VOLUME_LABEL = "OPENCORE"
 
+#: Windows' format refuses FAT32 volumes larger than this...
+FAT32_LIMIT = 32 * 1024 ** 3
+#: ...so on a bigger drive the media gets a partition this size and the rest
+#: stays unallocated. Several times what the media needs.
+PARTITION_MB = 16 * 1024
+
+#: MSFT_Disk.BusType values, from the Storage Management API
+BUS_TYPES = {1: "SCSI", 2: "ATAPI", 3: "ATA", 4: "IEEE 1394", 5: "SSA",
+             6: "Fibre Channel", 7: "USB", 8: "RAID", 9: "iSCSI", 10: "SAS",
+             11: "SATA", 12: "SD", 13: "MMC", 15: "File-backed virtual",
+             16: "Storage Spaces", 17: "NVMe"}
+
 
 class UnsafeTarget(Exception):
     """The chosen disk is not one this is willing to write to."""
@@ -48,15 +66,53 @@ class UnsafeTarget(Exception):
 
 
 class Disk:
-    """One candidate drive, as shown to the user."""
+    """One candidate drive, as shown to the user.
 
-    def __init__(self, index, model, size, removable, interface, letters=()):
+    ``removable`` is the media type (a stick or card, as opposed to a hard
+    drive); ``bus`` is how the disk is connected. When the bus is not known it
+    is taken from the interface, which says USB only for drives that use the
+    older USB mass-storage protocol -- so an unknown bus can only ever make a
+    drive *less* likely to be offered.
+    """
+
+    def __init__(self, index, model, size, removable, interface, letters=(),
+                 bus=None, system=False, windows=(), volumes=()):
         self.index = int(index)
         self.model = (model or "Unknown device").strip()
         self.size = int(size or 0)
         self.removable = bool(removable)
         self.interface = interface or ""
         self.letters = tuple(letters)
+        self.bus = bus or ("USB" if self.interface.upper() == "USB"
+                           else self.interface or "unknown")
+        #: Windows says it boots from, or keeps its system partition on, this
+        self.system = bool(system)
+        #: letters on this disk that hold a Windows installation
+        self.windows = tuple(windows)
+        #: (letter, label, size, free) for each volume, for the confirmation
+        self.volumes = tuple(volumes)
+
+    @property
+    def usb(self) -> bool:
+        return self.bus.upper() == "USB"
+
+    @property
+    def hard_drive(self) -> bool:
+        return self.usb and not self.removable
+
+    @property
+    def kind(self) -> str:
+        return "USB hard drive" if self.hard_drive else "USB stick"
+
+    def contents(self) -> list:
+        """One line per volume, for the person deciding whether to erase it."""
+        lines = []
+        for letter, label, size, free in self.volumes:
+            used = max(0, int(size or 0) - int(free or 0))
+            lines.append("%s  %s  -  %.1f GB, %.1f GB used" % (
+                letter, label or "(no name)", int(size or 0) / 1024 ** 3,
+                used / 1024 ** 3))
+        return lines
 
     @property
     def size_gb(self) -> float:
@@ -87,51 +143,106 @@ def protected_letters() -> set:
     return letters
 
 
-def list_disks(wmi_module=None) -> list:
-    """Removable drives, or an empty list where this cannot be asked."""
+def _storage_disks(wmi_module) -> dict:
+    """``{disk number: (bus name, boot or system)}`` from the Storage API.
+
+    ``MSFT_Disk`` reports the real bus -- a UAS enclosure is USB here while
+    Win32_DiskDrive calls it SCSI -- and Windows' own opinion of whether it
+    boots from the disk. Windows 8 and later; an empty answer leaves the
+    interface to decide, which errs towards offering less.
+    """
+    try:
+        storage = wmi_module.WMI(namespace="root/Microsoft/Windows/Storage")
+        found = {}
+        for disk in storage.MSFT_Disk():
+            bus = BUS_TYPES.get(int(getattr(disk, "BusType", 0) or 0), "other")
+            system = bool(getattr(disk, "IsBoot", False)
+                          or getattr(disk, "IsSystem", False))
+            found[int(disk.Number)] = (bus, system)
+        return found
+    except Exception:
+        return {}
+
+
+def _has_windows(letter: str) -> bool:
+    return os.path.isdir("%s\\Windows\\System32" % letter.rstrip("\\"))
+
+
+def list_disks(wmi_module=None, include_hard_drives=False,
+               has_windows=_has_windows) -> list:
+    """USB drives that may be offered, or an empty list where this cannot be asked.
+
+    Sticks always; USB hard drives only with *include_hard_drives*. Anything
+    not on the USB bus is never returned at all.
+    """
     if os.name != "nt" and wmi_module is None:
         return []
     if wmi_module is None:
         import wmi as wmi_module
     client = wmi_module.WMI()
+    storage = _storage_disks(wmi_module)
     disks = []
     for drive in client.Win32_DiskDrive():
+        index = getattr(drive, "Index", -1)
         interface = getattr(drive, "InterfaceType", "") or ""
         media = getattr(drive, "MediaType", "") or ""
-        removable = ("removable" in media.lower()
-                     or interface.upper() == "USB")
-        letters = []
+        pnp = (getattr(drive, "PNPDeviceID", "") or "").upper()
+        bus, system = storage.get(int(index), (None, False))
+        if bus is None and (interface.upper() == "USB"
+                            or pnp.startswith("USBSTOR\\")):
+            bus = "USB"
+        letters, volumes = [], []
         try:
             for partition in drive.associators("Win32_DiskDriveToDiskPartition"):
                 for logical in partition.associators(
                         "Win32_LogicalDiskToPartition"):
-                    if getattr(logical, "DeviceID", None):
-                        letters.append(logical.DeviceID.rstrip("\\"))
+                    letter = (getattr(logical, "DeviceID", None) or "").rstrip("\\")
+                    if letter:
+                        letters.append(letter)
+                        volumes.append((letter,
+                                        getattr(logical, "VolumeName", "") or "",
+                                        getattr(logical, "Size", 0) or 0,
+                                        getattr(logical, "FreeSpace", 0) or 0))
         except Exception:
             pass
-        disks.append(Disk(getattr(drive, "Index", -1),
-                          getattr(drive, "Model", ""),
+        windows = [letter for letter in letters if has_windows(letter)]
+        disks.append(Disk(index, getattr(drive, "Model", ""),
                           getattr(drive, "Size", 0) or 0,
-                          removable, interface, letters))
-    return [d for d in disks if d.removable]
+                          "removable" in media.lower(), interface, letters,
+                          bus=bus, system=system, windows=windows,
+                          volumes=volumes))
+    return [d for d in disks
+            if d.usb and (d.removable or include_hard_drives)]
 
 
-def check_target(disk: Disk, needed_bytes: int = 0) -> None:
+def check_target(disk: Disk, needed_bytes: int = 0,
+                 allow_hard_drives: bool = False) -> None:
     """Raise unless *disk* is safe to erase. Every rule, in one place."""
     if disk is None:
         raise UnsafeTarget("No drive is selected.",
                            "Choose the USB stick to write to.")
-    if not disk.removable:
+    if not disk.usb:
         raise UnsafeTarget(
-            "%s is not a removable drive." % disk.model,
-            "OpCoreForge only writes to removable drives. If this really is a "
-            "USB stick that Windows reports as fixed, copy the InstallMedia "
-            "folder onto it yourself instead - the layout is the same.")
+            "%s is not connected over USB (%s)." % (disk.model, disk.bus),
+            "OpCoreForge only ever writes to USB drives, so internal SATA, "
+            "NVMe and RAID disks cannot be erased here by any setting. If this "
+            "really is a USB drive, copy the InstallMedia folder onto it "
+            "yourself instead - the layout is the same.")
+    if disk.hard_drive and not allow_hard_drives:
+        raise UnsafeTarget(
+            "%s is a USB hard drive, not a stick." % disk.model,
+            "Tick \"List USB hard drives\" to use one. Erasing it erases "
+            "every partition on it, not just one.")
     if disk.index == 0:
         raise UnsafeTarget(
             "Disk 0 is never written to.",
             "That is where Windows normally lives, whatever it reports about "
             "itself.")
+    if disk.system:
+        raise UnsafeTarget(
+            "Windows starts from %s." % disk.model,
+            "It is this PC's boot or system disk, so it is refused regardless "
+            "of anything else.")
     protected = protected_letters() & {l[0].upper() for l in disk.letters}
     if protected:
         raise UnsafeTarget(
@@ -139,6 +250,12 @@ def check_target(disk: Disk, needed_bytes: int = 0) -> None:
                                     ", ".join(sorted(protected)) + ":"),
             "That is this PC's system or program drive, so it is refused "
             "regardless of anything else.")
+    if disk.windows:
+        raise UnsafeTarget(
+            "%s has Windows installed on %s." % (disk.model,
+                                                 ", ".join(disk.windows)),
+            "A drive with a Windows installation on it is never erased here, "
+            "even one that is not the Windows running now.")
     if disk.size < MINIMUM_BYTES:
         raise UnsafeTarget(
             "%s is only %.1f GB." % (disk.model, disk.size_gb),
@@ -150,18 +267,25 @@ def check_target(disk: Disk, needed_bytes: int = 0) -> None:
             "Use a larger USB stick.")
 
 
-def diskpart_script(disk: Disk, label: str = VOLUME_LABEL) -> str:
+def diskpart_script(disk: Disk, label: str = VOLUME_LABEL,
+                    allow_hard_drives: bool = False) -> str:
     """Exactly what would be handed to diskpart. Runs nothing.
 
     Kept separate so it can be shown to the user, written to the log and
     asserted on in tests without a disk anywhere near it.
+
+    Windows will not format FAT32 larger than 32 GB, so on a bigger drive the
+    partition is capped and the rest of the drive left unallocated.
     """
-    check_target(disk)
+    check_target(disk, allow_hard_drives=allow_hard_drives)
+    create = "create partition primary"
+    if disk.size > FAT32_LIMIT:
+        create += " size=%d" % PARTITION_MB
     return "\n".join([
         "select disk %d" % disk.index,
         "clean",
         "convert gpt",
-        "create partition primary",
+        create,
         "format fs=fat32 quick label=%s" % label[:11],
         "assign",
         "exit",
@@ -170,7 +294,8 @@ def diskpart_script(disk: Disk, label: str = VOLUME_LABEL) -> str:
 
 
 def write_media(disk: Disk, media: Path, confirm: str, report=None,
-                runner=None, progress=None) -> str:
+                runner=None, progress=None, allow_hard_drives=False,
+                find_letter=None) -> str:
     """Erase *disk* and copy *media* onto it. Returns the drive letter.
 
     ``confirm`` must equal the disk's own label. It is not a formality: it is
@@ -187,7 +312,7 @@ def write_media(disk: Disk, media: Path, confirm: str, report=None,
     if media.exists():
         from .media import folder_size
         needed = folder_size(media)
-    check_target(disk, needed)
+    check_target(disk, needed, allow_hard_drives)
     if confirm != disk.label():
         raise UnsafeTarget(
             "The drive that was confirmed is not the drive selected.",
@@ -197,12 +322,12 @@ def write_media(disk: Disk, media: Path, confirm: str, report=None,
             "There is no install media to write.",
             "Prepare the folder first.")
 
-    script = diskpart_script(disk)
+    script = diskpart_script(disk, allow_hard_drives=allow_hard_drives)
     say("Erasing %s..." % disk.label())
     run = runner or _run_diskpart
-    output = run(script)
+    run(script)
 
-    letter = _new_letter(output)
+    letter = (find_letter or _new_letter)(disk.index)
     say("Formatted. Copying %.1f GB..." % (needed / 1024 ** 3))
     if letter is None:
         raise UnsafeTarget(
@@ -298,28 +423,29 @@ def _run_diskpart(script: str) -> str:
             pass
 
 
-def _new_letter(diskpart_output: str):
-    """The letter diskpart assigned, read back from Windows rather than it."""
-    import string
-    if os.name != "nt":
+def _new_letter(disk_index: int, wmi_module=None, tries: int = 20):
+    """The letter Windows gave the volume just made on disk *disk_index*.
+
+    Read from that disk's own partitions, not by searching every drive for
+    the OPENCORE label: with a second OpenCore stick plugged in, the label
+    search could find that one and copy the media onto the wrong drive.
+    """
+    if os.name != "nt" and wmi_module is None:
         return None
-    for letter in string.ascii_uppercase[3:]:      # never A, B or C
-        root = Path("%s:\\" % letter)
+    if wmi_module is None:
+        import wmi as wmi_module
+    for _attempt in range(tries):
         try:
-            if root.exists() and _volume_label(root) == VOLUME_LABEL:
-                return "%s:" % letter
-        except OSError:
-            continue
+            client = wmi_module.WMI()
+            for drive in client.Win32_DiskDrive(Index=disk_index):
+                for partition in drive.associators(
+                        "Win32_DiskDriveToDiskPartition"):
+                    for logical in partition.associators(
+                            "Win32_LogicalDiskToPartition"):
+                        letter = getattr(logical, "DeviceID", None)
+                        if letter:
+                            return letter.rstrip("\\")
+        except Exception:
+            pass
+        time.sleep(0.5)        # Windows mounts the new volume a moment later
     return None
-
-
-def _volume_label(root: Path) -> str:
-    try:
-        import ctypes
-        buffer = ctypes.create_unicode_buffer(261)
-        ctypes.windll.kernel32.GetVolumeInformationW(
-            ctypes.c_wchar_p(str(root)), buffer, 261,
-            None, None, None, None, 0)
-        return buffer.value.upper()
-    except Exception:
-        return ""

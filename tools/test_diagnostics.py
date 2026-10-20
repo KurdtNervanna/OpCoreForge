@@ -389,10 +389,11 @@ def main():
           "nothing is lost" in App.ELEVATION_TEXT, True)
 
     # -- surviving a crash while the editor comes up -----------------------
-    # Embedding ProperTree demotes its window with `wm forget`, and that has
-    # faulted inside Tk on a real machine. A marker written before the attempt
-    # and removed after it turns "crashes every time you reach stage 8" into
-    # "opens in its own window instead", without needing the user to know why.
+    # Embedding ProperTree reaches past what most Tk programs do, and the older
+    # way of doing it faulted inside Tk on a real machine. A marker written
+    # before the attempt and removed after it turns "crashes every time you
+    # reach the editor" into "opens in its own window instead", without
+    # needing the user to know why.
     from opcoreforge.ui.stages_config import ConfigStage
 
     class FakeApp:
@@ -431,30 +432,20 @@ def main():
     check("the preference survives being written and read",
           editor_paths.read_state().get("editor_windowed"), False)
 
-    # With nothing remembered, Windows gets its own window: embedding demotes
-    # ProperTree's window with wm forget, and that faulted inside Tk on a real
-    # machine three times running. A separate window is ProperTree's own
-    # supported configuration.
-    from opcoreforge.ui import stages_config as config_module
-
+    # With nothing remembered, the editor goes in the tab everywhere --
+    # Windows included. It used to default to a window there, because
+    # demoting ProperTree's window with wm forget faulted inside Tk on a real
+    # machine; the tab now holds it in a -container frame instead, and the
+    # crash marker above is the fallback if that ever fails too.
     fresh = FakePaths(Path(tempfile.mkdtemp(prefix="ocf-default-")))
     clean = ConfigStage.__new__(ConfigStage)
     clean.app = FakeApp(fresh)
     clean._crashed_before = False
-    saved_os = config_module.os
-    try:
-        config_module.os = type("os", (), {"name": "nt"})
-        check("Windows defaults to the editor's own window",
-              clean._wants_embedding(), False)
-        config_module.os = type("os", (), {"name": "posix"})
-        check("elsewhere it still embeds", clean._wants_embedding(), True)
-        # An explicit choice outranks the platform, in both directions.
-        config_module.os = type("os", (), {"name": "nt"})
-        fresh.write_state(editor_windowed=False)
-        check("but asking for embedding on Windows is honoured",
-              clean._wants_embedding(), True)
-    finally:
-        config_module.os = saved_os
+    check("with nothing remembered the editor goes in the tab",
+          clean._wants_embedding(), True)
+    fresh.write_state(editor_windowed=True)
+    check("but asking for its own window is honoured",
+          clean._wants_embedding(), False)
 
     STDERR.write("\n")
     for status, label, value in RESULTS:

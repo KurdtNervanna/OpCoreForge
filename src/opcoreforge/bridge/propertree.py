@@ -19,11 +19,20 @@ Three things make that possible:
    and shows it on Ctrl+T), and our window stays ours.  ``bind_all`` still
    reaches the whole application, so the keyboard shortcuts keep working.
 
-2. **``wm forget``.**  A document window is created as a child of the tab frame
-   and then demoted from a top-level to an ordinary managed widget.  Tk supports
-   this directly; the window keeps its widgets, bindings and state, it simply
-   gets laid out by the packer instead of the window manager.  Every ``wm``
-   method then raises, so the ones ProperTree calls are shimmed to no-ops.
+2. **Getting the document window into the tab**, one of two ways:
+
+   - ``container`` (the default where Tk supports it: Windows and X11). The tab
+     holds a frame created with ``-container``, and the document window is
+     *created* inside it with ``-use``. This is Tk's own mechanism for
+     hosting one top-level inside another. Nothing is converted after the
+     fact; Tk sizes the window to the frame. The window-manager calls
+     ProperTree makes on it are harmless or ignored, and the two that are
+     not (withdraw marks it hidden, deiconify raises) are shimmed.
+   - ``forget`` (everywhere else). The document window is created as a child
+     of the tab frame and then demoted from a top-level with ``wm forget``.
+     That works, but on Windows it faulted inside Tk itself while the first
+     document was opening -- three times, in three different calls -- which
+     is why the container is preferred wherever it exists.
 
 3. **A redirected ``stackorder``.**  Every ProperTree menu command resolves its
    target with ``stackorder(...)[-1]``, and a forgotten window is invisible to
@@ -52,7 +61,21 @@ _WM_NOOP = (
 )
 
 
-def _make_embedded_class(plistwindow_module, container, on_close):
+def embed_method(widget) -> str:
+    """``container`` where Tk can host a top-level in a frame, else ``forget``.
+
+    ``-container``/``-use`` exist on Windows and X11; Tk on macOS (aqua) has
+    no such thing.
+    """
+    try:
+        system = widget.tk.call("tk", "windowingsystem")
+    except Exception:
+        return "forget"
+    return "container" if system in ("win32", "x11") else "forget"
+
+
+def _make_embedded_class(plistwindow_module, container, on_close,
+                         method="forget"):
     """Build a PlistWindow subclass that lives inside *container*."""
 
     base = plistwindow_module.PlistWindow
@@ -64,7 +87,19 @@ def _make_embedded_class(plistwindow_module, container, on_close):
 
         def __init__(self, controller, root, **kw):
             target = EmbeddedPlistWindow._pending_container
-            if target is not None:
+            if target is not None and method == "container":
+                EmbeddedPlistWindow._pending_container = None
+                # Marked embedded before construction, so the wm calls
+                # upstream's __init__ makes go to the shims below -- deiconify
+                # raises on an embedded window rather than doing nothing.
+                self.embedded = True
+                self.embed_method = "container"
+                # The id exactly as Tk spells it ("0x..."), which is what
+                # -use is documented to take, rather than winfo_id()'s int.
+                base.__init__(self, controller, root,
+                              use=target.tk.call("winfo", "id", str(target)),
+                              **kw)
+            elif target is not None:
                 EmbeddedPlistWindow._pending_container = None
                 base.__init__(self, controller, target, **kw)
                 self._embed(target)
@@ -81,6 +116,7 @@ def _make_embedded_class(plistwindow_module, container, on_close):
             self.tk.call("pack", str(self), "-in", str(container_widget),
                          "-fill", "both", "-expand", "1")
             self.embedded = True
+            self.embed_method = "forget"
 
         def _noop(self, *a, **kw):
             return ""
@@ -185,6 +221,8 @@ class EmbeddedProperTree:
         self.pt_root = None
         #: False once the editor has been opened as its own window instead
         self.embed = True
+        #: how it is held in the tab: "container", "forget", or None
+        self.method = None
         #: MainThreadPump, set by the app; keeps worker threads off Tk
         self.pump = None
         self._starting = False
@@ -193,7 +231,8 @@ class EmbeddedProperTree:
 
     # -- construction ----------------------------------------------------
 
-    def start(self, root: tk.Misc, container: tk.Misc, embed: bool = True):
+    def start(self, root: tk.Misc, container: tk.Misc, embed: bool = True,
+              method: str = None):
         """Bring the editor up, in the tab or in a window of its own.
 
         ``embed`` False skips the ``wm forget`` demotion entirely and lets
@@ -202,6 +241,9 @@ class EmbeddedProperTree:
         embedding turns out not to work on a particular machine -- everything
         else here (OC Snapshot pointed at the built EFI, save, reload, the
         stage order) is identical either way.
+
+        ``method`` picks how an embedded editor is held -- see
+        ``embed_method`` -- and is normally left to it.
         """
         import pt_app
         from pt_scripts import plistwindow
@@ -216,10 +258,23 @@ class EmbeddedProperTree:
         self._starting = True
 
         self.embed = embed
-        self._container = container if embed else None
+        self.method = (method or embed_method(root)) if embed else None
+        self._container = None
+        if embed and self.method == "container":
+            # -container has to be given when the frame is created, and the
+            # frame has to exist on screen before a window can -use it.
+            from ..ui import theme
+            frame = tk.Frame(container, container=True, borderwidth=0,
+                             highlightthickness=0, background=theme.PANEL)
+            frame.pack(fill="both", expand=True)
+            frame.update_idletasks()
+            self._container = frame
+        elif embed:
+            self._container = container
 
         embedded_cls = _make_embedded_class(
-            plistwindow, self._container, on_close=self._handle_close)
+            plistwindow, self._container, on_close=self._handle_close,
+            method=self.method or "forget")
 
         created: list = []
         real_tk_class = tk.Tk
@@ -407,6 +462,11 @@ class EmbeddedProperTree:
             # exactly the distinction the Windows API cares about.
             top_level = []
             for window in windows:
+                # A window hosted in a container frame still reports "wm",
+                # but its handle is a child window all the same -- so the
+                # embedded flag is asked first.
+                if getattr(window, "embedded", False):
+                    continue
                 try:
                     if window.winfo_manager() == "wm":
                         top_level.append(window)

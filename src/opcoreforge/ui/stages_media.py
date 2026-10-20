@@ -1,5 +1,5 @@
 """
-Stage 10: the macOS install media.
+Stage 6: the macOS install media, and what the machine needs around it.
 
 Three outputs from the same folder -- copy it to a USB by hand, let OpCoreForge
 write the USB, or build an ISO for a virtual machine. The folder is prepared
@@ -28,10 +28,11 @@ from .widgets import Banner, Card, CheckTable, KeyValue, ScrollFrame
 
 class MediaStage(Stage):
     key = "media"
-    label = "10 - Install media"
+    label = "6 - Install media"
     heading = "macOS install media"
     blurb = ("Puts the EFI you just built together with a macOS recovery, as a "
-             "folder, a bootable USB stick, or an ISO for a virtual machine.")
+             "folder, a bootable USB drive, or an ISO for a virtual machine - "
+             "and lists what the machine needs before and after.")
 
     def __init__(self, app, parent):
         super().__init__(app, parent)
@@ -62,8 +63,11 @@ class MediaStage(Stage):
                  "macOS either way; it just downloads during setup."
         ).pack(anchor="w")
 
-        # -- 1. recovery ----------------------------------------------------
-        step1 = Card(body, "1. macOS recovery")
+        # -- 1. macOS, and the media put together ---------------------------
+        # One step: downloading the recovery was only ever followed by
+        # preparing the folder, so one button does both, and skips the
+        # download when the recovery for this model is already there.
+        step1 = Card(body, "1. Get macOS and put the media together")
         step1.pack(fill="x", pady=(0, 12))
         row = ttk.Frame(step1.body, style="Card.TFrame")
         row.pack(fill="x")
@@ -81,46 +85,46 @@ class MediaStage(Stage):
                    command=lambda: self.app.open_path(
                        media_module.DORTANIA_URL)
                    ).pack(side="left")
-        self.download_button = ttk.Button(
-            row, text="Download recovery", style="Accent.TButton",
-            command=self._download)
-        self.download_button.pack(side="right")
+        self.prepare_button = ttk.Button(
+            row, text="Get macOS and prepare", style="Accent.TButton",
+            command=self._prepare)
+        self.prepare_button.pack(side="right")
         self.board_note = ttk.Label(step1.body, style="CardMuted.TLabel",
                                     wraplength=880, justify="left", text="")
         self.board_note.pack(anchor="w", pady=(8, 0))
-
-        # -- 2. folder ------------------------------------------------------
-        step2 = Card(body, "2. Put the media together")
-        step2.pack(fill="x", pady=(0, 12))
-        row2 = ttk.Frame(step2.body, style="Card.TFrame")
-        row2.pack(fill="x")
-        self.stage_button = ttk.Button(row2, text="Prepare the folder",
-                                       style="Accent.TButton",
-                                       command=self._stage)
-        self.stage_button.pack(side="left")
-        ttk.Button(row2, text="Open it",
+        row2 = ttk.Frame(step1.body, style="Card.TFrame")
+        row2.pack(fill="x", pady=(10, 0))
+        ttk.Button(row2, text="Open the media folder",
                    command=lambda: self.app.open_path(
                        media_module.media_dir(self.app.paths))
-                   ).pack(side="left", padx=(8, 0))
-        self.media_summary = KeyValue(step2.body)
+                   ).pack(side="left")
+        self.media_summary = KeyValue(step1.body)
         self.media_summary.pack(fill="x", pady=(10, 0))
 
         # -- 3. USB ---------------------------------------------------------
-        step3 = Card(body, "3. Write a USB stick  (erases it completely)")
+        step3 = Card(body, "2. Write a USB drive  (erases it completely)")
         step3.pack(fill="x", pady=(0, 12))
         row3 = ttk.Frame(step3.body, style="Card.TFrame")
         row3.pack(fill="x")
         ttk.Button(row3, text="Rescan drives", style="Small.TButton",
                    command=self._rescan).pack(side="left")
+        # As in Rufus: hard drives are hidden until asked for. Only ever USB
+        # ones -- internal SATA and NVMe disks are never listed by anything.
+        self.list_hard_drives = tk.BooleanVar(value=False)
+        ttk.Checkbutton(row3, text="List USB hard drives",
+                        variable=self.list_hard_drives,
+                        style="Card.TCheckbutton",
+                        command=self._rescan).pack(side="left", padx=(14, 0))
         self.usb_note = ttk.Label(step3.body, style="CardMuted.TLabel",
                                   wraplength=880, justify="left", text="")
         self.usb_note.pack(anchor="w", pady=(8, 0))
         self.disk_table = CheckTable(
             step3.body,
             columns=[("mark", "", 40, "center"),
-                     ("drive", "Removable drive", 420, "w"),
-                     ("size", "Size", 110, "center"),
-                     ("letters", "Currently", 160, "w")],
+                     ("drive", "USB drive", 380, "w"),
+                     ("kind", "Type", 130, "w"),
+                     ("size", "Size", 100, "center"),
+                     ("letters", "Currently", 140, "w")],
             on_toggle=self._pick_disk, height=4)
         self.disk_table.pack(fill="x", pady=(8, 0))
         self.write_button = ttk.Button(step3.body, text="Erase and write",
@@ -128,7 +132,7 @@ class MediaStage(Stage):
         self.write_button.pack(anchor="e", pady=(10, 0))
 
         # -- 4. ISO ---------------------------------------------------------
-        step4 = Card(body, "4. Or build an ISO  (for virtual machines)")
+        step4 = Card(body, "3. Or build an ISO  (for virtual machines)")
         step4.pack(fill="x", pady=(0, 12))
         ttk.Label(step4.body, style="CardMuted.TLabel", wraplength=880,
                   justify="left",
@@ -145,12 +149,18 @@ class MediaStage(Stage):
                                      command=self._build_iso)
         self.iso_button.pack(anchor="w", pady=(10, 0))
 
+        # What used to be the separate "Finish" stage: BIOS settings to change
+        # first, the EFI check, and what to do once macOS is on the machine.
+        # Under the steps, so the thing this stage is for comes first.
+        from .stages_config import Checklist
+        self.checklist = Checklist(self.app, body)
+
     # -- entering ----------------------------------------------------------
 
     def on_enter(self):
         self.ensure_built()
+        self.refresh()
         self._refresh_boards()
-        self._refresh_summary()
         if os.name != "nt":
             self.usb_note.configure(
                 text="Writing a USB stick needs Windows - it is diskpart that "
@@ -158,6 +168,15 @@ class MediaStage(Stage):
             self.write_button.state(["disabled"])
         elif not self._disks:
             self._rescan()
+
+    def refresh(self):
+        if not self.built:
+            return
+        try:
+            self.checklist.refresh()
+        except Exception:
+            pass
+        self._refresh_summary()
 
     def _refresh_boards(self):
         """List the Macs that can be asked for the release chosen in stage 2.
@@ -199,7 +218,7 @@ class MediaStage(Stage):
         picked = self._model_for(self._board_id())
         if picked and picked == smbios:
             self.board_note.configure(
-                text="%s is the SMBIOS stage 3 chose, and its board can be "
+                text="%s is the SMBIOS chosen in stage 2, and its board can be "
                      "asked for %s - so the recovery matches the machine the "
                      "EFI presents." % (picked, wanted))
         else:
@@ -207,7 +226,7 @@ class MediaStage(Stage):
                 text="Asking for %s. %s cannot be used for it, so a Mac that "
                      "can is offered instead - the board only decides which "
                      "macOS Apple sends, not what the EFI presents."
-                     % (wanted, smbios or "The SMBIOS from stage 3"))
+                     % (wanted, smbios or "The SMBIOS from stage 2"))
 
     def _model_for(self, board_id):
         for board, model, _label in self._boards:
@@ -249,9 +268,8 @@ class MediaStage(Stage):
                 "not included (it could not be downloaded) - the media "
                 "still installs macOS",
                 "good" if state["companion"] else "warn")
-        self.stage_button.state(
-            ["!disabled"] if state["efi"] and state["recovery"]
-            else ["disabled"])
+        self.prepare_button.state(
+            ["!disabled"] if state["efi"] else ["disabled"])
         for button in (self.iso_button,):
             button.state(["!disabled"] if state["staged"] else ["disabled"])
         if os.name == "nt":
@@ -261,41 +279,37 @@ class MediaStage(Stage):
 
     # -- actions -----------------------------------------------------------
 
-    def _download(self):
-        def work():
-            media_module.ensure_macrecovery(self.app.paths,
-                                            report=self.app.report)
-            self.app.pump.post(self._refresh_boards)
-            board = self._board_id()
-            if not board:
-                raise media_module.MediaError(
-                    "No Mac model has been chosen.",
-                    "Pick one from the list - its board ID is what tells "
-                    "Apple which macOS to send.")
-            return media_module.download_recovery(self.app.paths, board,
-                                                  report=self.app.report)
-
-        def done(_folder):
-            self._refresh_summary()
+    def _prepare(self):
+        """Download the recovery if it is not already here, then lay out the media."""
+        # Read on the Tk thread, before the worker starts: a Tk variable is
+        # not something a worker thread may touch.
+        board = self._board_id()
+        if not board:
             self.banner.show(
-                "Recovery downloaded. Prepare the folder next, then write a "
-                "USB or build an ISO from it.", "good")
+                "Pick a Mac model first - its board ID is what tells Apple "
+                "which macOS to send.", "warn")
+            return
+        paths = self.app.paths
 
-        self.app.run_stage("Downloading the macOS recovery", work, done)
+        def work():
+            if media_module.downloaded_board(paths) == board:
+                self.app.report("The recovery for this Mac model is already "
+                                "downloaded")
+            else:
+                media_module.ensure_macrecovery(paths, report=self.app.report)
+                media_module.download_recovery(paths, board,
+                                               report=self.app.report)
+            return media_module.stage_media(paths, report=self.app.report,
+                                            progress=self.app.progress)
 
-    def _stage(self):
-        self.app.run_stage(
-            "Preparing the install media",
-            lambda: media_module.stage_media(self.app.paths,
-                                             report=self.app.report,
-                                             progress=self.app.progress),
-            self._staged)
+        self.app.run_stage("Getting macOS and preparing the media", work,
+                           self._staged)
 
     def _staged(self, folder):
         self._refresh_summary()
         self.banner.show(
-            "Install media ready in %s. Copy everything in it to a FAT32 "
-            "USB stick, or use the buttons below. The copy of config.plist "
+            "Install media ready in %s. Write it to a USB drive below, build "
+            "an ISO, or copy everything in it to a FAT32 USB stick yourself. The copy of config.plist "
             "on the media shows auxiliary entries, so macOS Recovery appears "
             "in the picker without pressing Space - the EFI for the installed "
             "system is untouched, and is also on the media in the OpCoreForge "
@@ -304,7 +318,8 @@ class MediaStage(Stage):
 
     def _rescan(self):
         try:
-            self._disks = usbwriter.list_disks()
+            self._disks = usbwriter.list_disks(
+                include_hard_drives=self.list_hard_drives.get())
         except Exception as exc:
             self._disks = []
             self.usb_note.configure(
@@ -315,14 +330,25 @@ class MediaStage(Stage):
         for disk in self._disks:
             self.disk_table.add_row(
                 str(disk.index),
-                ["", disk.model, "%.1f GB" % disk.size_gb,
+                ["", disk.model, disk.kind, "%.1f GB" % disk.size_gb,
                  ", ".join(disk.letters) or "no letter"],
                 tags=("normal",))
-        if not self._disks and os.name == "nt":
-            self.usb_note.configure(
-                text="No removable drives found. Plug the USB stick in and "
-                     "press Rescan. Only removable drives are listed - a "
-                     "fixed disk is never offered, whatever it is.")
+        if os.name == "nt":
+            if not self._disks:
+                self.usb_note.configure(
+                    text="No USB drives found. Plug the stick in and press "
+                         "Rescan. Only drives connected over USB are ever "
+                         "listed - internal SATA and NVMe disks are never "
+                         "offered, whatever is ticked.")
+            elif self.list_hard_drives.get():
+                self.usb_note.configure(
+                    text="USB hard drives are listed too. Erasing one erases "
+                         "every partition on it. Internal disks are never "
+                         "listed.")
+            else:
+                self.usb_note.configure(
+                    text="USB sticks are listed. Tick \"List USB hard drives\" "
+                         "for an external SSD or hard drive.")
         self._refresh_summary()
 
     def _pick_disk(self, item):
@@ -335,7 +361,7 @@ class MediaStage(Stage):
             chosen = disk is self._selected_disk
             self.disk_table.add_row(
                 str(disk.index),
-                ["*" if chosen else "", disk.model,
+                ["*" if chosen else "", disk.model, disk.kind,
                  "%.1f GB" % disk.size_gb,
                  ", ".join(disk.letters) or "no letter"],
                 tags=("selected" if chosen else "normal",))
@@ -346,8 +372,9 @@ class MediaStage(Stage):
         if disk is None:
             self.banner.show("Choose the USB stick to write to first.", "warn")
             return
+        allow = self.list_hard_drives.get()
         try:
-            usbwriter.check_target(disk)
+            usbwriter.check_target(disk, allow_hard_drives=allow)
         except usbwriter.UnsafeTarget as refused:
             self.banner.show("%s %s" % (refused.message, refused.hint), "bad")
             return
@@ -361,22 +388,39 @@ class MediaStage(Stage):
                 "media copied onto it.\n\nContinue?" % disk.label(),
                 parent=self.app.root, icon="warning", default="no"):
             return
+        if disk.hard_drive and not messagebox.askyesno(
+                "Erase a whole hard drive?",
+                "%s is a hard drive, not a USB stick.\n\nEvery partition on "
+                "it is erased, not just one:\n\n    %s\n\nAnything on it that "
+                "is not backed up somewhere else will be gone. Erase it?"
+                % (disk.label(),
+                   "\n    ".join(disk.contents()) or "(no partitions with a "
+                                                   "drive letter)"),
+                parent=self.app.root, icon="warning", default="no"):
+            return
 
         label = disk.label()
         media_path = media_module.media_dir(self.app.paths)
         self.app.session_log.note("usb", "erasing %s" % label)
         self.app.session_log.note("usb", "diskpart script:\n"
-                                  + usbwriter.diskpart_script(disk))
+                                  + usbwriter.diskpart_script(
+                                      disk, allow_hard_drives=allow))
 
         def done(letter):
             self._rescan()
             self.app.mark_done(self.key)
+            rest = ""
+            if disk.size > usbwriter.FAT32_LIMIT:
+                rest = (" The media uses a 16 GB partition, since Windows "
+                        "will not format FAT32 any larger; the rest of the "
+                        "drive is unallocated and can be given a partition "
+                        "of its own in Disk Management.")
             self.banner.show(
                 "Done. Written to %s and flushed, so the drive is safe to "
                 "remove. Boot the target machine from it and pick \"macOS "
                 "Base System\" in the OpenCore picker. If the picker looks "
                 "empty, press Space - that reveals auxiliary entries, and "
-                "macOS Recovery is one." % letter, "good")
+                "macOS Recovery is one.%s" % (letter, rest), "good")
             messagebox.showinfo(
                 "USB stick ready",
                 "The install media is written to %s and safe to unplug.\n\n"
@@ -387,7 +431,8 @@ class MediaStage(Stage):
             "Writing the USB stick",
             lambda: usbwriter.write_media(disk, media_path, confirm=label,
                                           report=self.app.report,
-                                          progress=self.app.progress),
+                                          progress=self.app.progress,
+                                          allow_hard_drives=allow),
             done)
 
     def _build_iso(self):

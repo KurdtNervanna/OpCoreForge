@@ -221,7 +221,7 @@ def is_elevated():
     """True/False if it can be determined, None if it cannot.
 
     On Windows this decides whether stage 1 can dump the ACPI tables and
-    whether stage 7 sees every USB port, so it is worth saying out loud rather
+    whether stage 4 sees every USB port, so it is worth saying out loud rather
     than letting both fail in their own confusing ways.
     """
     try:

@@ -430,6 +430,10 @@ def stage_media(paths, report=None, progress=None) -> Path:
                             progress)
     if progress:
         progress(total, total)
+    # The companion and an untouched copy of the EFI, for after macOS is
+    # installed. Copied from the source, so the tuning below never reaches it.
+    from . import media_companion
+    media_companion.add_to_media(paths, target, efi, report=report)
     changed = tune_config_for_install(target / "EFI" / "OC" / "config.plist")
     for note in changed:
         say(note)
@@ -502,7 +506,10 @@ def media_summary(paths) -> dict:
     recovery = recovery_dir(paths)
     staged = media_dir(paths)
     base = recovery / "BaseSystem.dmg"
+    from . import media_companion
+    companion = staged / media_companion.FOLDER / media_companion.DMG_NAME
     return {
+        "companion": companion.exists(),
         "efi": paths.efi_dir.exists(),
         "macrecovery": have_macrecovery(paths),
         "recovery": base.exists(),

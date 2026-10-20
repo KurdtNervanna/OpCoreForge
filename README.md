@@ -6,13 +6,17 @@ OpCore-Simplify, USBToolBox and ProperTree combined into one portable Windows
 executable, driven by a GUI that runs them in the order they actually have to
 run in.
 
-> **Windows only.** OpCoreForge runs on **Windows** and nowhere else. It
-> is the *preparation* step for installing macOS on hardware Apple does not
-> support: you run it on a Windows PC — ideally the target machine itself, so
-> it can read that machine's hardware and USB ports — to build the OpenCore EFI
-> and the macOS install media. macOS itself is then installed by booting the
-> target machine from that media. It is not a macOS or Linux application, and
-> it does nothing on a machine that already runs macOS.
+> **Two halves, one per operating system.** OpCoreForge itself runs on
+> **Windows** and nowhere else. It is the *preparation* step for installing
+> macOS on hardware Apple does not support: you run it on a Windows PC —
+> ideally the target machine itself, so it can read that machine's hardware and
+> USB ports — to build the OpenCore EFI and the macOS install media. macOS is
+> then installed by booting the target machine from that media.
+>
+> **OpCoreForge Companion** is the other half: a small **macOS** app that comes
+> on the same USB stick and runs on the target machine once macOS is installed.
+> It puts OpenCore onto the machine's own disk, so the stick is no longer needed
+> to boot it. See [After macOS is installed](#after-macos-is-installed-opcoreforge-companion).
 
 Each of the three does one part of building a working OpenCore EFI, and
 OpCore-Simplify ends by telling you to go and do the other two by hand:
@@ -127,7 +131,7 @@ Ten tabs, unlocked as their inputs appear.
 | 7 USB map | USBToolBox | Live port discovery, connector types, comments; builds `UTBMap.kext` **and installs it into the EFI, removing `UTBDefault.kext` and rewriting `Kernel -> Add` to match**. |
 | 8 config.plist | ProperTree | The full editor. On Windows it opens in its own window (see below); OC Snapshot already knows which OC folder to scan. |
 | 9 Finish | — | BIOS settings to change, how to deploy, what is still outstanding; checks the EFI against its own `config.plist`. |
-| 10 Install media | — | Downloads a macOS recovery and puts it with the EFI: a folder, a bootable USB, or an ISO for a VM. |
+| 10 Install media | — | Downloads a macOS recovery and puts it with the EFI: a folder, a bootable USB, or an ISO for a VM. Adds the companion app for after the install. |
 
 Everything lives beside the executable:
 
@@ -140,6 +144,7 @@ OpCoreForge_Data/
     USBMap/         usb.json, settings.json, UTBMap.kext
     ProperTree/     editor settings, Configuration.tex
     bin/            iasl.exe, macserial.exe, Hardware-Sniffer-CLI.exe
+    Companion/      the companion disk image, as downloaded for the media
     logs/
 ```
 
@@ -192,9 +197,9 @@ quietly.
 
 Three outputs, all from one folder so the safe path always exists:
 
-- **The folder.** `OpCoreForge_Data\InstallMedia` holds `EFI\` and
-  `com.apple.recovery.boot\`. Format a USB stick as FAT32 and copy both
-  across; that is the whole procedure.
+- **The folder.** `OpCoreForge_Data\InstallMedia` holds `EFI\`,
+  `com.apple.recovery.boot\` and `OpCoreForge\`. Format a USB stick as FAT32
+  and copy all three across; that is the whole procedure.
 - **The USB.** The only thing here that can destroy data, so: removable drives
   only, never disk 0, never a disk holding the system drive, and the drive has
   to be named back in the confirmation before anything runs. The `diskpart`
@@ -226,6 +231,91 @@ says nothing for four minutes is indistinguishable from one that has died, so:
   before them is done, so that is where the mark comes from.
 - Writing a USB flushes Windows' write cache before saying it is finished,
   because "copied" and "safe to unplug" are not the same moment.
+
+---
+
+## After macOS is installed: OpCoreForge Companion
+
+Until OpenCore is on the machine's own disk, the machine only starts macOS with
+the USB stick plugged in. Doing that by hand means mounting a hidden EFI
+partition from Terminal and copying the right folders onto it without
+disturbing the ones Windows needs. The companion does it with one button.
+
+**Getting it.** Stage 10 puts an `OpCoreForge` folder on the install media:
+
+```
+OpCoreForge/
+    OpCoreForge-Companion.dmg   the macOS app
+    EFI/                        the EFI exactly as built, for the internal disk
+    media.json                  which OpCoreForge made the stick, and when
+    READ ME.txt
+```
+
+Once macOS is up, open the stick in Finder, open the disk image and run
+**OpCoreForge Companion**. It is also attached to every
+[release](https://github.com/KurdtNervanna/OpCoreForge/releases).
+
+The second `EFI` is the point of that folder. The one at the root of the stick
+has the install settings described above (recovery shown, a long timeout),
+which are wrong for an installed system; this copy has none of them, and it is
+what the companion offers first. A stick made by an older OpCoreForge has only
+the root `EFI`, and the companion can still install that.
+
+**What it does.**
+
+1. Works out which disk macOS is on (through the APFS container to the
+   physical disk behind it) and lists that disk's EFI partition first. Only
+   internal disks are offered as the destination: the point is to stop needing
+   a USB stick, so offering one would be a trap. It also shows which partition
+   OpenCore started from, read from OpenCore's own `boot-path` NVRAM variable.
+2. Checks the EFI with the same `eficheck.audit` stage 9 uses, and refuses one
+   OpenCore would halt on.
+3. Sets `Misc -> Boot -> LauncherOption` to `Full` in the copy it installs, so
+   the first time OpenCore starts from the internal disk it adds its own entry
+   to the firmware's boot menu and keeps it at the top. That is what replaces
+   "boot from the USB stick". A value set on purpose is left alone, and the
+   checkbox turns this off.
+4. Asks for the administrator password once, then backs up the partition's
+   whole `EFI` folder to `~/Library/Application Support/OpCoreForge
+   Companion/EFI backups/` and replaces **only** `EFI/OC` and `EFI/BOOT`.
+   `EFI/Microsoft` and anything else on the partition is left exactly as it
+   was, so a disk shared with Windows still starts Windows.
+5. If any copy fails, puts the previous `OC` and `BOOT` back before it exits.
+   A partition without room is refused before anything is touched.
+
+After that: shut down, unplug the stick, and start the machine from the
+internal disk — pick it in the firmware's boot menu the first time.
+
+The script that runs as root is built by a pure function and shown in the log,
+like the `diskpart` script. `tools/test_companion.py` runs it against folders
+standing in for EFI partitions, with stand-ins for `diskutil` and `ditto`, to
+prove the backup comes first, Windows survives and a failed copy is undone.
+
+The companion can also **copy itself into Applications**, so it is still there
+once the stick goes back in a drawer.
+
+**Opening it.** Copied off a stick written on Windows, the app carries no
+quarantine flag and opens with a double-click. Downloaded on the Mac through a
+browser, it is unsigned, so the first time it needs right-click › Open (on
+Sequoia and later: System Settings › Privacy & Security › Open Anyway).
+
+**Building it.** It has to be built on a Mac, so GitHub Actions does it
+(`.github/workflows/companion.yml`, an Intel runner): the tests, a PyInstaller
+build from `Companion.spec`, a self-test of the finished app, and the disk
+image. Publishing a release attaches `OpCoreForge-Companion.dmg` to it a few
+minutes later, which is where stage 10 downloads it from: first the release
+matching its own version, then the latest. A `.dmg` dropped into
+`OpCoreForge_Data\Companion` by hand is used as it is. To build one on a Mac
+yourself, use Python from python.org (it targets macOS 10.13 and bundles Tk):
+
+```
+python3 -m pip install pyinstaller certifi pillow
+python3 -m PyInstaller --clean --noconfirm Companion.spec
+```
+
+**Not yet.** Updating OpenCore and kexts on the installed EFI, and
+post-install patches for hardware that needs them, are planned for the
+companion and not in it today.
 
 ---
 
@@ -445,6 +535,7 @@ python tools/test_pump.py         # 21 checks: the pump under a nested event loo
 python tools/test_fatimage.py     # 27 checks: the FAT32 writer, read back by mtools
 python tools/test_isoimage.py     # 18 checks: the ISO's UEFI boot chain, byte by byte
 python tools/test_media.py        # 78 checks: boards, the recovery pipeline, every USB refusal
+python tools/test_companion.py    # 85 checks: macOS disks, the root install script run for real, the media
 python tools/test_eficheck.py     # 53 checks: config.plist must not name a file the EFI lacks
 python tools/test_progress.py     # 45 checks: progress, elapsed time, completion marks
 python tools/test_buildbat.py     # 15 checks on BUILD_EXE.bat, under a real cmd.exe
@@ -496,7 +587,8 @@ failure that takes the application down before a dialog can be read.
   settings written in. The kexts are not in the EFI — they install after macOS
   is up. [`docs/NVIDIA-DRIVER.md`](docs/NVIDIA-DRIVER.md) has the detail, and
   the driver is PolyForm Noncommercial (personal / research / non-profit use).
-- **Windows is the only supported platform.** Hardware Sniffer is a Windows
+- **OpCoreForge runs only on Windows; the companion only on macOS.**
+  Hardware Sniffer is a Windows
   binary, USB port discovery reads live PnP data through WMI, the ACPI dump
   needs an elevated Windows process, and the USB writer uses `diskpart`. Much
   of the Python underneath happens to be cross-platform — which is what lets
@@ -521,7 +613,9 @@ failure that takes the application down before a dialog can be read.
 
 All the real work belongs to the upstream authors. OpCoreForge is integration
 code around them, and each project keeps its own licence in
-`src/vendor/*/LICENSE`.
+`src/vendor/*/LICENSE`. **Credits**, at the top right of both apps, lists
+them along with everyone who has contributed to OpCoreForge itself, read from
+GitHub when it opens.
 
 - [OpCore-Simplify](https://github.com/lzhoang2801/OpCore-Simplify) — lzhoang2801 — BSD 3-Clause
 - [USBToolBox/tool](https://github.com/USBToolBox/tool) — dhinakg — MIT

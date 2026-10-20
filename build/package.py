@@ -28,6 +28,8 @@ INCLUDE = [
     "THIRD-PARTY-NOTICES.md",
     "BUILD_EXE.bat",
     "OpCoreForge.spec",
+    "Companion.spec",
+    ".github",
     ".gitignore",
     "src",
     "build",

@@ -241,6 +241,14 @@ class MediaStage(Stage):
             "Install media",
             str(state["staged_path"]) if state["staged"]
             else "not prepared yet")
+        if state["staged"]:
+            self.media_summary.set(
+                "Companion app",
+                "included - run it on the machine once macOS is installed"
+                if state["companion"] else
+                "not included (it could not be downloaded) - the media "
+                "still installs macOS",
+                "good" if state["companion"] else "warn")
         self.stage_button.state(
             ["!disabled"] if state["efi"] and state["recovery"]
             else ["disabled"])
@@ -286,11 +294,13 @@ class MediaStage(Stage):
     def _staged(self, folder):
         self._refresh_summary()
         self.banner.show(
-            "Install media ready in %s. Copy both folders to a FAT32 USB "
-            "stick, or use the buttons below. The copy of config.plist on the "
-            "media shows auxiliary entries, so macOS Recovery appears in the "
-            "picker without pressing Space - the EFI for the installed system "
-            "is untouched." % folder, "good")
+            "Install media ready in %s. Copy everything in it to a FAT32 "
+            "USB stick, or use the buttons below. The copy of config.plist "
+            "on the media shows auxiliary entries, so macOS Recovery appears "
+            "in the picker without pressing Space - the EFI for the installed "
+            "system is untouched, and is also on the media in the OpCoreForge "
+            "folder with the companion app, which puts it on the internal "
+            "disk once macOS is installed." % folder, "good")
 
     def _rescan(self):
         try:

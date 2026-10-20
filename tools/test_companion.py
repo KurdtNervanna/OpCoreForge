@@ -570,12 +570,24 @@ def fake_dmg(path: Path, size=4096):
 
 
 class Fetcher:
-    def __init__(self, body=None):
-        self.body = body
-        self.urls = []
+    """Stands in for upstream's ResourceFetcher.
 
-    def download_and_save_file(self, url, destination):
+    ``releases`` maps a releases-API URL to its JSON; anything not in it
+    answers None, as the real fetcher does when the API cannot be reached.
+    """
+
+    def __init__(self, body=None, releases=None):
+        self.body = body
+        self.releases = releases or {}
+        self.urls = []
+        self.hashes = []
+
+    def fetch_and_parse_content(self, url, kind=None):
+        return self.releases.get(url)
+
+    def download_and_save_file(self, url, destination, sha256_hash=None):
         self.urls.append(url)
+        self.hashes.append(sha256_hash)
         if self.body is None:
             return False
         Path(destination).write_bytes(self.body)
@@ -632,6 +644,43 @@ def test_media(scratch: Path):
     check("media: without the app the READ ME says where to get it",
           (out2 / "OpCoreForge" / "READ ME.txt").read_text(),
           lambda t: "/releases" in t and "could not be downloaded" in t)
+
+    # -- the published SHA-256 -------------------------------------------
+    tagged, latest = media_companion.release_api_urls("9.9.9")
+    digest = "12" * 32
+
+    def release(*assets):
+        return {"assets": [{"name": name, "digest": value}
+                           for name, value in assets]}
+
+    plan = media_companion.download_plan(Fetcher(releases={
+        tagged: release(("OpCoreForge-Companion.dmg", "sha256:" + digest)),
+        latest: release(("OpCoreForge-Companion.dmg", "sha256:" + "34" * 32)),
+    }), "9.9.9")
+    check("hash: each release's image is downloaded against its own digest",
+          [h for _url, h in plan], [digest, "34" * 32])
+    plan = media_companion.download_plan(Fetcher(releases={
+        tagged: release(("OpCoreForge.exe", "sha256:" + digest)),
+        latest: release(("OpCoreForge-Companion.dmg", "sha256:" + digest)),
+    }), "9.9.9")
+    check("hash: a release the API lists without the image is skipped",
+          plan, [(media_companion.download_urls("9.9.9")[1], digest)])
+    plan = media_companion.download_plan(Fetcher(), "9.9.9")
+    check("hash: when the API cannot be reached, both are still tried",
+          plan, [(url, None) for url in media_companion.download_urls("9.9.9")])
+    check("hash: a digest that is not SHA-256 is not used",
+          media_companion.published_sha256(release(
+              ("OpCoreForge-Companion.dmg", "md5:abc"))), None)
+
+    verified = FakePaths(scratch / "data-hash")
+    make_efi(verified.results)
+    own_tag, own_latest = media_companion.release_api_urls()
+    hashed = Fetcher(bytes(good), releases={
+        own_tag: release(("OpCoreForge-Companion.dmg", "sha256:" + digest))})
+    media_companion._download_failed = False
+    media_companion.find_dmg(verified, hashed)
+    check("hash: the download is handed the published digest",
+          hashed.hashes, [digest])
 
     manual = FakePaths(scratch / "data-three")
     media_companion.cache_dir(manual).mkdir(parents=True)

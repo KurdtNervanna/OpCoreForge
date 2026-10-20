@@ -323,22 +323,59 @@ def main():
 
     scraped = [{"product_name": "OpenCorePkg", "id": 1,
                 "url": "https://github.com/acidanthera/OpenCorePkg/releases/"
-                       "download/1.0.4/OpenCore-1.0.4-RELEASE.zip"}]
+                       "download/1.0.4/OpenCore-1.0.4-RELEASE.zip",
+                "sha256": "ab" * 32}]
     check("the release zip is found in a scraped asset list",
-          media._opencorepkg_url(FakeGithub(scraped), FakeFetcher()),
-          lambda u: u.endswith("OpenCore-1.0.4-RELEASE.zip"))
-    check("the build index is preferred when it answers",
-          media._opencorepkg_url(FakeGithub(scraped), FakeFetcher(
+          media._opencorepkg_release(FakeGithub(scraped), FakeFetcher()),
+          lambda r: r[0].endswith("OpenCore-1.0.4-RELEASE.zip"))
+    check("with the SHA-256 the release page shows beside it",
+          media._opencorepkg_release(FakeGithub(scraped), FakeFetcher())[1],
+          "ab" * 32)
+    check("the build index is preferred when it answers, with its hash",
+          media._opencorepkg_release(FakeGithub(scraped), FakeFetcher(
+              {"OpenCorePkg": {"versions": [
+                  {"links": {"release": "https://example/oc.zip"},
+                   "hashes": {"release": {"sha256": "cd" * 32}}}]}})),
+          ("https://example/oc.zip", "cd" * 32))
+    check("an index entry without hashes still gives the zip",
+          media._opencorepkg_release(FakeGithub(scraped), FakeFetcher(
               {"OpenCorePkg": {"versions": [
                   {"links": {"release": "https://example/oc.zip"}}]}})),
-          "https://example/oc.zip")
+          ("https://example/oc.zip", None))
     check("a DEBUG build is not mistaken for the release",
-          media._opencorepkg_url(FakeGithub([
+          media._opencorepkg_release(FakeGithub([
               {"product_name": "OpenCorePkg", "url":
                "https://x/OpenCore-1.0.4-DEBUG.zip"}]), FakeFetcher()),
-          None)
+          (None, None))
     check("and nothing at all is reported as nothing",
-          media._opencorepkg_url(FakeGithub([]), FakeFetcher()), None)
+          media._opencorepkg_release(FakeGithub([]), FakeFetcher()),
+          (None, None))
+
+    # The download itself is handed that hash, and a refused one is an error.
+    class Downloads(FakeFetcher):
+        def __init__(self, index, ok):
+            super().__init__(index)
+            self.ok = ok
+            self.hashes = []
+
+        def download_and_save_file(self, url, destination, sha256_hash=None):
+            self.hashes.append(sha256_hash)
+            return self.ok
+
+    index = {"OpenCorePkg": {"versions": [
+        {"links": {"release": "https://example/oc.zip"},
+         "hashes": {"release": {"sha256": "ef" * 32}}}]}}
+    refused = Downloads(index, ok=False)
+    try:
+        media.ensure_macrecovery(FakePaths(Path(tempfile.mkdtemp())),
+                                 fetcher=refused, github=FakeGithub([]))
+        RESULTS.append(("FAIL", "a download that fails its checksum stops",
+                        "no exception"))
+    except media.MediaError as refusal:
+        check("a download that fails its checksum stops, and says why",
+              "SHA-256" in refusal.hint, True)
+    check("OpenCorePkg is downloaded against its published hash",
+          refused.hashes, ["ef" * 32])
 
     # -- the USB writer's refusals ------------------------------------------
     good = usbwriter.Disk(2, "SanDisk Ultra USB", 32 * 1024 ** 3, True, "USB",

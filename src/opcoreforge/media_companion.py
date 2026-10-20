@@ -16,8 +16,11 @@ instead.
 
 The disk image cannot be built on Windows -- it is made on a Mac by GitHub
 Actions and attached to each release -- so it is downloaded from the release
-matching this version, or the latest one, and cached in the data folder. A
-``.dmg`` placed in ``OpCoreForge_Data/Companion`` by hand is used as it is.
+matching this version, or the latest one, and cached in the data folder. The
+download is checked against the SHA-256 GitHub publishes for the release file,
+read from the releases API; only when that API cannot be reached is it
+downloaded unchecked, as before, and the log says so. A ``.dmg`` placed in
+``OpCoreForge_Data/Companion`` by hand is used as it is.
 None of this is allowed to fail the media: without the image the stick still
 installs macOS, and the note says where to get the app.
 """
@@ -75,6 +78,55 @@ def download_urls(version: str = __version__) -> list:
     ]
 
 
+def release_api_urls(version: str = __version__) -> list:
+    """The releases API entries matching :func:`download_urls`, in order."""
+    return [
+        "%s/releases/tags/v%s" % (project.API_URL, version),
+        "%s/releases/latest" % project.API_URL,
+    ]
+
+
+def published_sha256(release) -> str | None:
+    """The SHA-256 GitHub publishes for the disk image in *release*.
+
+    *release* is the releases API's JSON. GitHub gives each asset a
+    ``digest`` of the form ``sha256:<hex>``.
+    """
+    for asset in (release or {}).get("assets") or []:
+        if asset.get("name") != DMG_NAME:
+            continue
+        digest = asset.get("digest") or ""
+        if digest.startswith("sha256:") and len(digest) == 7 + 64:
+            return digest[7:].lower()
+    return None
+
+
+def download_plan(fetcher, version: str = __version__) -> list:
+    """``[(url, sha256)]`` to try in order.
+
+    A release the API lists without the disk image is skipped, since its
+    download URL can only 404. A release the API could not be asked about at
+    all is still tried, with no hash -- an API outage or rate limit should not
+    leave the app off the stick.
+    """
+    plan = []
+    lookup = getattr(fetcher, "fetch_and_parse_content", None)
+    for url, api in zip(download_urls(version), release_api_urls(version)):
+        release = None
+        if lookup:
+            try:
+                release = lookup(api, "json")
+            except Exception:
+                release = None
+        if not isinstance(release, dict) or "assets" not in release:
+            plan.append((url, None))
+            continue
+        sha256 = published_sha256(release)
+        if sha256:
+            plan.append((url, sha256))
+    return plan
+
+
 def _looks_like_dmg(path: Path) -> bool:
     # A UDIF image ends in a 512-byte trailer starting "koly". Checked so an
     # HTML error page saved under the right name is not shipped as the app.
@@ -116,10 +168,13 @@ def find_dmg(paths, fetcher=None, report=None):
         except Exception:
             return None
     partial = folder / (versioned.name + ".part")
-    for url in download_urls():
-        say("Downloading the companion app...")
+    for url, sha256 in download_plan(fetcher):
+        say("Downloading the companion app%s..." % (
+            " (checked against its published SHA-256)" if sha256 else
+            " - GitHub's checksum for it could not be read, so this copy "
+            "is not verified"))
         try:
-            ok = fetcher.download_and_save_file(url, str(partial))
+            ok = fetcher.download_and_save_file(url, str(partial), sha256)
         except Exception:
             ok = False
         if ok and _looks_like_dmg(partial):

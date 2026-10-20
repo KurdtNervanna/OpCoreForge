@@ -166,7 +166,8 @@ macOS binary writing an APFS volume — which is why OpenCore Legacy Patcher can
 offer one and this cannot. The macOS you end up with is the same.
 
 The recovery itself is downloaded by **OpenCore's own `macrecovery.py`**,
-extracted from the OpenCorePkg release. Apple's recovery protocol is
+extracted from the OpenCorePkg release — whose zip is checked against the
+SHA-256 Dortania's build index (or the release page) publishes for it. Apple's recovery protocol is
 undocumented and moves; reimplementing it would be a quiet way to fetch the
 wrong thing.
 
@@ -333,7 +334,9 @@ build from `Companion.spec`, a self-test of the finished app, and the disk
 image. The release workflow (see [Releases](#releases)) attaches
 `OpCoreForge-Companion.dmg` to every release it makes, and a release published
 by hand gets it a few minutes later, which is where stage 6 downloads it from:
-first the release matching its own version, then the latest. A `.dmg` dropped into
+first the release matching its own version, then the latest, checking it
+against the SHA-256 GitHub publishes for the file. Only if GitHub's API cannot
+be reached is it downloaded unchecked, and the log says so. A `.dmg` dropped into
 `OpCoreForge_Data\Companion` by hand is used as it is. To build one on a Mac
 yourself, use Python from python.org (it targets macOS 10.13 and bundles Tk):
 
@@ -503,10 +506,10 @@ Every delivered build gets its own version, so two builds are never
 confusable. It appears in four places:
 
 ```
-title bar                     OpCoreForge 2.1.2
-OpCoreForge.exe --version     OpCoreForge 2.1.2
-OpCoreForge.exe --self-test   OpCoreForge 2.1.2 self test
-Explorer > Properties         File version 2.1.2
+title bar                     OpCoreForge 2.1.3
+OpCoreForge.exe --version     OpCoreForge 2.1.3
+OpCoreForge.exe --self-test   OpCoreForge 2.1.3 self test
+Explorer > Properties         File version 2.1.3
 ```
 
 `CHANGELOG.md` records what changed in each one. The version lives in exactly
@@ -576,8 +579,8 @@ python tools/test_diagnostics.py  # 75 checks: session log, frozen paths, COM, e
 python tools/test_pump.py         # 21 checks: the pump under a nested event loop
 python tools/test_fatimage.py     # 27 checks: the FAT32 writer, read back by mtools
 python tools/test_isoimage.py     # 18 checks: the ISO's UEFI boot chain, byte by byte
-python tools/test_media.py        # 106 checks: boards, the recovery pipeline, every USB refusal
-python tools/test_companion.py    # 85 checks: macOS disks, the root install script run for real, the media
+python tools/test_media.py        # 110 checks: boards, the recovery pipeline, every USB refusal
+python tools/test_companion.py    # 90 checks: macOS disks, the root install script run for real, the media
 python tools/test_eficheck.py     # 53 checks: config.plist must not name a file the EFI lacks
 python tools/test_progress.py     # 44 checks: progress, elapsed time, completion marks
 python tools/test_buildbat.py     # 15 checks on BUILD_EXE.bat, under a real cmd.exe

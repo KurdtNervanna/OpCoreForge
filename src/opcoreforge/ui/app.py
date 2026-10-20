@@ -3,11 +3,13 @@ OpCoreForge main window.
 
 One window, one ordered workflow, three upstream tools:
 
-    stages 1-6   OpCore-Simplify   analyse hardware, choose macOS, build the EFI
-    stage 7      USBToolBox        map the USB ports, install UTBMap.kext
-    stage 8      ProperTree        OC Snapshot and edit config.plist
-    stage 9                        what is left to do on the target machine
-    stage 10                       the macOS install media to boot it from
+    stages 1-3   OpCore-Simplify   analyse hardware, choose macOS (and review
+                                   the SMBIOS, ACPI and kexts it picks), build
+                                   the EFI
+    stage 4      USBToolBox        map the USB ports, install UTBMap.kext
+    stage 5      ProperTree        edit config.plist, OC Snapshot (optional)
+    stage 6                        the install media, and what the target
+                                   machine needs before and after
 
 The order is not cosmetic. OpCore-Simplify's own closing instructions are to go
 away and run the other two tools afterwards, in that order, because the USB
@@ -34,9 +36,8 @@ from ..bridge.usbtoolbox import UsbController
 from . import credits as credits_window
 from . import prompt as prompt_ui
 from . import theme
-from .stages import (AcpiStage, BuildStage, HardwareStage, KextStage,
-                     MacOSStage, SmbiosStage)
-from .stages_config import ConfigStage, FinishStage
+from .stages import BuildStage, ConfigureStage, HardwareStage
+from .stages_config import ConfigStage
 from .stages_media import MediaStage
 from .stages_usb import UsbStage
 from .widgets import LogPane
@@ -72,8 +73,8 @@ def _duration(seconds: float) -> str:
     return "%d:%02d" % (seconds // 60, seconds % 60)
 
 STAGE_CLASSES = [
-    HardwareStage, MacOSStage, SmbiosStage, AcpiStage, KextStage,
-    BuildStage, UsbStage, ConfigStage, FinishStage, MediaStage,
+    HardwareStage, ConfigureStage, BuildStage, UsbStage, ConfigStage,
+    MediaStage,
 ]
 
 
@@ -84,6 +85,8 @@ class App:
         self.efi_changed = False
         self.usb_map_installed = False
         self._unlocked = {"hardware"}
+        #: stages shown inside another one (Configure's tabs) -> that stage
+        self.parent_of = {}
         self._tab_pending = False
         # Progress and completion state. A step that takes minutes and says
         # nothing is indistinguishable from one that has died.
@@ -204,6 +207,10 @@ class App:
             self.notebook.add(stage, text=cls.label)
             if cls.key not in self._unlocked:
                 self.notebook.tab(index, state="disabled")
+            # Configure's four screens are reachable by their own keys too.
+            for key, child in getattr(stage, "children_stages", {}).items():
+                self.stages[key] = child
+                self.parent_of[key] = cls.key
 
         self.log_visible = tk.BooleanVar(value=False)
         self.log_frame = ttk.Frame(bottom, style="App.TFrame")
@@ -375,7 +382,7 @@ class App:
         "Two steps need it and will fail or come back incomplete without it:\n\n"
         "  •  Stage 1 dumps this PC's ACPI tables, which Windows only "
         "hands to an elevated process.\n"
-        "  •  Stage 7 reads USB controller and port properties, and "
+        "  •  Stage 4 reads USB controller and port properties, and "
         "quietly reports fewer ports without it.\n\n"
         "Restart as administrator now? Nothing has been done yet, so nothing "
         "is lost.")
@@ -392,7 +399,7 @@ class App:
         self.session_log.note("elevation", "not running as administrator")
         self.stages["hardware"].banner.show(
             "Not running as administrator. Stage 1 cannot dump the ACPI "
-            "tables and stage 7 may miss USB ports. Close this and re-open it "
+            "tables and stage 4 may miss USB ports. Close this and re-open it "
             "with right-click › Run as administrator.", "warn")
         if messagebox.askyesno("Administrator rights", self.ELEVATION_TEXT,
                                parent=self.root, icon="warning"):
@@ -455,7 +462,7 @@ class App:
 
         This runs inside ttk::notebook's own tab-change event, while the C
         widget is still in the middle of switching. Stage entry is not light
-        work -- stage 8 builds the whole embedded editor, which pumps the Tk
+        work -- the config.plist stage builds the whole embedded editor, which pumps the Tk
         event loop and can even change tabs again -- and doing that inside the
         notebook's own bookkeeping is how a re-entrant crash happens. Idle
         callbacks run once the notebook has finished, which is soon enough for
@@ -486,19 +493,49 @@ class App:
         self.stages[key].on_enter()
 
     def unlock(self, key):
+        """Make a stage reachable. It does not tick anything.
+
+        Ticks used to come from unlocking -- reaching a stage ticked the one
+        before it -- and a build unlocks three stages at once, so the USB map
+        and config.plist were ticked the moment the EFI was built, before
+        either had been touched. Stages now tick themselves when their own
+        work is done (``mark_done``).
+        """
+        parent = self.parent_of.get(key)
+        if parent:
+            self.unlock(parent)
+            self.stages[parent].unlock_inner(key)
+            return
         if key in self._unlocked:
             return
         self._unlocked.add(key)
         index = self.stage_order.index(key)
         self.notebook.tab(index, state="normal")
-        # Reaching a stage means the one before it is finished -- that is the
-        # only condition under which anything unlocks -- so tick it.
-        if index > 0:
-            self.mark_done(self.stage_order[index - 1])
+        self.refresh_next_buttons()
 
     def goto(self, key):
         self.unlock(key)
-        self.notebook.select(self.stage_order.index(key))
+        parent = self.parent_of.get(key)
+        if parent:
+            self.notebook.select(self.stage_order.index(parent))
+            self.stages[parent].select_inner(key)
+        else:
+            self.notebook.select(self.stage_order.index(key))
+
+    def next_ready(self, key) -> bool:
+        return self.parent_of.get(key, key) in self._unlocked
+
+    def refresh_next_buttons(self, only=None):
+        """Enable each stage's "Next" button once where it goes is unlocked."""
+        for stage in ([only] if only is not None else self.stages.values()):
+            button = getattr(stage, "next_button", None)
+            if button is None or not stage.next_key:
+                continue
+            try:
+                button.state(["!disabled"] if self.next_ready(stage.next_key)
+                             else ["disabled"])
+            except Exception:
+                pass
 
     def refresh_stage(self, key):
         stage = self.stages.get(key)
@@ -510,7 +547,7 @@ class App:
 
     def after_build(self):
         self.efi_changed = True
-        self.refresh_stage("finish")
+        self.refresh_stage("media")
 
     def run_stage(self, status, work, on_done=None, on_error=None,
                   on_abort=None):
@@ -654,7 +691,7 @@ class App:
         banner that scrolls out of sight, and nothing else on screen changes,
         so there is no way to tell a finished stage from an abandoned one.
         """
-        if key in self._done or key not in self.stages:
+        if key in self._done or key not in self.stage_order:
             return
         self._done.add(key)
         try:

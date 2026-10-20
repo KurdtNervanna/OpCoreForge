@@ -266,7 +266,7 @@ class OcsController:
         self.ocl_patched_macos_version = oclp
         return report
 
-    # -- stage 2: macOS version -----------------------------------------
+    # -- stage 2 (Configure): macOS version --------------------------------
 
     def suggested_macos_version(self) -> str:
         """Ask upstream which version it would default to.
@@ -446,7 +446,7 @@ class OcsController:
             self.customized_hardware, self.smbios_model, self.macos_version,
             self.ocpe.ac.patches, self.ocpe.k)
 
-    # -- stage 3: SMBIOS -------------------------------------------------
+    # -- stage 2 (Configure): SMBIOS ---------------------------------------
 
     def smbios_catalog(self):
         """(device, supported_on_selected_macos, recommended_for_platform)."""
@@ -478,7 +478,7 @@ class OcsController:
         except Exception as exc:
             return {"error": str(exc)}
 
-    # -- stage 4: ACPI patches -------------------------------------------
+    # -- stage 2 (Configure): ACPI patches ---------------------------------
 
     @property
     def acpi_patches(self):
@@ -489,7 +489,7 @@ class OcsController:
         patch.checked = not patch.checked
         return patch.checked
 
-    # -- stage 5: kexts ---------------------------------------------------
+    # -- stage 2 (Configure): kexts ----------------------------------------
 
     @property
     def kexts(self):
@@ -545,7 +545,7 @@ class OcsController:
                 "unavailable." % kext.name)
         return messages
 
-    # -- stage 6: build ---------------------------------------------------
+    # -- stage 3: build ---------------------------------------------------
 
     def bios_requirements(self):
         return self.ocpe.check_bios_requirements(self.hardware_report,

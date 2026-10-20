@@ -24,7 +24,11 @@ from .widgets import Banner, Card, ScrollFrame
 
 class UsbStage(Stage):
     key = "usb"
-    label = "7 - USB map"
+    label = "4 - USB map"
+    # The config.plist stage between here and the media is optional, and
+    # building the map already updated config.plist -- so "Next" skips it.
+    next_key = "media"
+    next_text = "Next: Install media  \u2192"
     heading = "USB port mapping"
     blurb = ("Plug a device into each port in turn: the port it lands on turns "
              "green. Enable the ports you want macOS to use, set each one's "
@@ -269,7 +273,7 @@ class UsbStage(Stage):
             self.banner.show(
                 "%d controller(s) have more than 15 enabled ports. macOS ignores "
                 "everything past 15, so disable the ones you do not use - or "
-                "enable the XhciPortLimit quirk in stage 8."
+                "enable the XhciPortLimit quirk in stage 5."
                 % len(over), "bad")
         elif usb.controllers:
             self.banner.hide()
@@ -464,16 +468,17 @@ class UsbStage(Stage):
         def done(result):
             path, actions = result
             self.app.usb_map_installed = True
+            self.app.mark_done(self.key)
+            self.app.refresh_stage("media")
             message = "Built %s and installed it into the EFI. %s" % (
                 path.name, " ".join(actions))
             if usb.over_limit_controllers():
                 message += (" One or more controllers still map more than 15 "
-                            "ports - enable XhciPortLimit in stage 8.")
+                            "ports - enable XhciPortLimit in stage 5.")
             self.banner.show(message + " config.plist was updated to match, so "
-                                       "the EFI is bootable as it stands; OC "
-                                       "Snapshot in stage 8 is still worth "
-                                       "running but no longer required.", "good")
-            self.app.goto("config")
+                                       "the EFI is ready as it stands - the "
+                                       "config.plist stage is optional. Next: "
+                                       "the install media.", "good")
 
         self.app.run_stage("Building UTBMap.kext", work, done)
 
@@ -481,6 +486,5 @@ class UsbStage(Stage):
         self.app.usb_map_installed = False
         self.banner.show(
             "Skipped. The EFI keeps UTBDefault.kext, which maps ports "
-            "generically - fine to get installed, worth revisiting later.",
-            "warn")
-        self.app.goto("config")
+            "generically - fine to get installed, worth revisiting later. "
+            "Next: the install media.", "warn")

@@ -29,16 +29,16 @@ OpCore-Simplify ends by telling you to go and do the other two by hand:
 >         - Use ProperTree to open your config.plist.
 >         - Run OC Snapshot by pressing Command/Ctrl + R.
 
-OpCoreForge turns that closing instruction into stages 7 and 8 of the same
+OpCoreForge turns that closing instruction into stages 4 and 5 of the same
 program, and does the file shuffling itself.
 
 ---
 
 ## What it looks like
 
-Ten tabs, left to right, each unlocking the next. A stage that is finished gets
-a tick, and the status bar says what just happened and how long it took rather
-than going back to "Ready".
+Six tabs, left to right, each unlocking the next, with a **Next** button on
+each. A stage gets a tick when its own work is done, and the status bar says
+what just happened and how long it took rather than going back to "Ready".
 
 ![Choosing the macOS release](docs/screenshots/01-macos-version.png)
 
@@ -114,24 +114,20 @@ uses the `.ico` on Windows and the PNG everywhere else, since Tk cannot read an
 
 **Run it as administrator.** Right-click › Run as administrator. Two stages
 need it: stage 1 dumps this PC's ACPI tables, which Windows only hands to an
-elevated process, and stage 7 reads USB port properties and silently reports
+elevated process, and stage 4 reads USB port properties and silently reports
 fewer ports without it. OpCoreForge checks at startup and offers to restart
 itself elevated if it is not.
 
-Ten tabs, unlocked as their inputs appear.
+Six tabs, unlocked as their inputs appear.
 
 | Stage | Tool | What happens |
 |---|---|---|
 | 1 Hardware | OpCore-Simplify | Run Hardware Sniffer, or import a `Report.json` + ACPI folder. Shows the compatibility report. |
-| 2 macOS | OpCore-Simplify | Every release from High Sierra to Tahoe, flagged where OpenCore Legacy Patcher would be required. |
-| 3 SMBIOS | OpCore-Simplify | The recommended Mac model, with the full 77-model catalogue behind a toggle. |
-| 4 ACPI | OpCore-Simplify | All 26 patches with their descriptions; the recommended set is pre-selected. |
-| 5 Kexts | OpCore-Simplify | All 88 kexts by category, with upstream's `R / x / ! / ? / -` status markers. |
-| 6 Build EFI | OpCore-Simplify | Downloads OpenCore + kexts, applies patches, generates config.plist, writes the EFI. |
-| 7 USB map | USBToolBox | Live port discovery, connector types, comments; builds `UTBMap.kext` **and installs it into the EFI, removing `UTBDefault.kext` and rewriting `Kernel -> Add` to match**. |
-| 8 config.plist | ProperTree | The full editor, inside the tab (with its own window as the fallback, see below); OC Snapshot already knows which OC folder to scan. |
-| 9 Finish | — | BIOS settings to change, how to deploy, what is still outstanding; checks the EFI against its own `config.plist`. |
-| 10 Install media | — | Downloads a macOS recovery and puts it with the EFI: a folder, a bootable USB, or an ISO for a VM. Adds the companion app for after the install. |
+| 2 Configure | OpCore-Simplify | The macOS release — every one from High Sierra to Tahoe, flagged where OpenCore Legacy Patcher would be required — and one line saying what it chose. Three tabs underneath review those choices, and are optional: the **SMBIOS** model (the full 77-model catalogue behind a toggle), the 26 **ACPI** patches, and the 88 **kexts** by category with upstream's `R / x / ! / ? / -` markers. |
+| 3 Build EFI | OpCore-Simplify | Downloads OpenCore + kexts, applies patches, generates config.plist, writes the EFI. |
+| 4 USB map | USBToolBox | Live port discovery, connector types, comments; builds `UTBMap.kext` **and installs it into the EFI, removing `UTBDefault.kext` and rewriting `Kernel -> Add` to match**. |
+| 5 config.plist | ProperTree | Optional. The full editor, inside the tab (with its own window as the fallback, see below); OC Snapshot already knows which OC folder to scan. |
+| 6 Install media | — | What was built and what the machine needs (BIOS settings, the EFI checked against its own `config.plist`, what to do after the install); then one button that downloads a macOS recovery and puts it with the EFI, written to a USB drive or an ISO for a VM. Adds the companion app for after the install. |
 
 Everything lives beside the executable:
 
@@ -155,7 +151,7 @@ If the folder holding the .exe is not writable, it falls back to
 
 ## The install media
 
-Stage 10 makes a macOS **Recovery** installer: the machine boots into Recovery
+Stage 6 makes a macOS **Recovery** installer: the machine boots into Recovery
 through OpenCore and downloads macOS from Apple during setup. A full offline
 installer cannot be built on Windows at all — Apple's `createinstallmedia` is a
 macOS binary writing an APFS volume — which is why OpenCore Legacy Patcher can
@@ -170,8 +166,8 @@ The board ID is what tells Apple which macOS to send, and it follows **the
 release chosen in stage 2, not the SMBIOS the EFI presents** — those are
 routinely different. A MacBookPro10,1 is a sensible SMBIOS for an Ivy Bridge
 laptop and a useless board for anything past Catalina, so asking for Sequoia
-with it returns Catalina, silently. Stage 10 therefore lists only Macs whose
-board reaches the chosen release, preferring the stage 3 SMBIOS when it
+with it returns Catalina, silently. Stage 6 therefore lists only Macs whose
+board reaches the chosen release, preferring the stage 2 SMBIOS when it
 qualifies and saying so when it does not. The model-to-board table in
 `boards.py` is transcribed from [Dortania's SMBIOS support
 page](https://dortania.github.io/OpenCore-Install-Guide/extras/smbios-support.html);
@@ -196,6 +192,10 @@ before a USB stick is written, and each repair is reported rather than done
 quietly.
 
 Three outputs, all from one folder so the safe path always exists:
+
+**Get macOS and prepare** does both halves in one go: it downloads the
+recovery for the chosen Mac model — skipping that if the recovery on disk is
+already for the same model — and lays out the folder. From that folder:
 
 - **The folder.** `OpCoreForge_Data\InstallMedia` holds `EFI\`,
   `com.apple.recovery.boot\` and `OpCoreForge\`. Format a USB stick as FAT32
@@ -258,7 +258,7 @@ the USB stick plugged in. Doing that by hand means mounting a hidden EFI
 partition from Terminal and copying the right folders onto it without
 disturbing the ones Windows needs. The companion does it with one button.
 
-**Getting it.** Stage 10 puts an `OpCoreForge` folder on the install media:
+**Getting it.** Stage 6 puts an `OpCoreForge` folder on the install media:
 
 ```
 OpCoreForge/
@@ -285,7 +285,7 @@ the root `EFI`, and the companion can still install that.
    internal disks are offered as the destination: the point is to stop needing
    a USB stick, so offering one would be a trap. It also shows which partition
    OpenCore started from, read from OpenCore's own `boot-path` NVRAM variable.
-2. Checks the EFI with the same `eficheck.audit` stage 9 uses, and refuses one
+2. Checks the EFI with the same `eficheck.audit` stage 6 uses, and refuses one
    OpenCore would halt on.
 3. Sets `Misc -> Boot -> LauncherOption` to `Full` in the copy it installs, so
    the first time OpenCore starts from the internal disk it adds its own entry
@@ -320,7 +320,7 @@ Sequoia and later: System Settings › Privacy & Security › Open Anyway).
 (`.github/workflows/companion.yml`, an Intel runner): the tests, a PyInstaller
 build from `Companion.spec`, a self-test of the finished app, and the disk
 image. Publishing a release attaches `OpCoreForge-Companion.dmg` to it a few
-minutes later, which is where stage 10 downloads it from: first the release
+minutes later, which is where stage 6 downloads it from: first the release
 matching its own version, then the latest. A `.dmg` dropped into
 `OpCoreForge_Data\Companion` by hand is used as it is. To build one on a Mac
 yourself, use Python from python.org (it targets macOS 10.13 and bundles Tk):
@@ -439,7 +439,7 @@ editor is built and removed once it is up, so a run that dies is noticed on the
 next launch and the editor opens in its own window instead, with the reason on
 screen. Everything that makes it part of OpCoreForge is the same either way —
 the same document, the same toolbar, OC Snapshot still pointed at the EFI
-stage 6 built. The **Own window** checkbox on stage 8 switches between the two
+stage 3 built. The **Own window** checkbox on stage 5 switches between the two
 and is remembered.
 
 Its self-updater is removed: it spawns `sys.executable Scripts/update_check.py`
@@ -476,7 +476,7 @@ start a second editor mid-construction.
 ### 6. Two improvements over running the tools separately
 
 - **OC Snapshot knows where to look.** Standalone ProperTree asks you to find
-  the OC folder. Here it is the EFI stage 6 just built, so the picker is
+  the OC folder. Here it is the EFI stage 3 just built, so the picker is
   answered automatically.
 - **A dead download no longer costs the whole build.** Upstream aborts the
   entire gather run if one asset is unreachable. OpCoreForge names the kext and
@@ -546,14 +546,14 @@ python tools/test_unsupported.py  # 13 checks: a refusal must be visible, not si
 python tools/test_nvidia_driver.py # 21 checks: NullMoth NVIDIA driver on Sequoia
 python tools/test_netdiag.py      # 31 checks: name the real cause of a failed download
 python tools/test_gpu_ceiling.py  # 24 checks: refuse macOS no GPU here can drive
-python tools/test_diagnostics.py  # 76 checks: session log, frozen paths, COM, elevation
+python tools/test_diagnostics.py  # 75 checks: session log, frozen paths, COM, elevation
 python tools/test_pump.py         # 21 checks: the pump under a nested event loop
 python tools/test_fatimage.py     # 27 checks: the FAT32 writer, read back by mtools
 python tools/test_isoimage.py     # 18 checks: the ISO's UEFI boot chain, byte by byte
-python tools/test_media.py        # 96 checks: boards, the recovery pipeline, every USB refusal
+python tools/test_media.py        # 99 checks: boards, the recovery pipeline, every USB refusal
 python tools/test_companion.py    # 85 checks: macOS disks, the root install script run for real, the media
 python tools/test_eficheck.py     # 53 checks: config.plist must not name a file the EFI lacks
-python tools/test_progress.py     # 45 checks: progress, elapsed time, completion marks
+python tools/test_progress.py     # 44 checks: progress, elapsed time, completion marks
 python tools/test_buildbat.py     # 15 checks on BUILD_EXE.bat, under a real cmd.exe
 python tools/bench_detect.py      # times the log path and ACPI parsing
 python tools/bench_logpane.py     # isolates the per-write cost of the log pane
@@ -611,7 +611,7 @@ failure that takes the application down before a dialog can be read.
   the test suite run under `xvfb-run` on Linux — but that is a development
   convenience, not a way to use OpCoreForge. Run it on Windows, preferably on
   the machine macOS is going onto; if that is not possible, stage 1 can import
-  a `Report.json` and stage 7 a `usb.json` captured on the target machine.
+  a `Report.json` and stage 4 a `usb.json` captured on the target machine.
 - **The bundled payload is a starting point, not a pin.** After unpacking it
   once, OpCore-Simplify's own update logic takes over unchanged — release ids
   compared against `history.json`, SHA-256 verified, anything stale

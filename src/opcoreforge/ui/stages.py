@@ -24,11 +24,15 @@ class Stage(ttk.Frame):
     label = ""
     heading = ""
     blurb = ""
+    #: the stage the header's "Next" button goes to, if it has one
+    next_key = ""
+    next_text = ""
 
     def __init__(self, app, parent):
         super().__init__(parent, style="TFrame")
         self.app = app
         self.built = False
+        self.next_button = None
 
     def build(self):
         """Create widgets once, lazily."""
@@ -44,11 +48,27 @@ class Stage(ttk.Frame):
     def header(self, parent):
         box = ttk.Frame(parent, style="TFrame")
         box.pack(fill="x", padx=18, pady=(16, 10))
-        ttk.Label(box, text=self.heading, style="H2.TLabel").pack(anchor="w")
+        top = ttk.Frame(box, style="TFrame")
+        top.pack(fill="x")
+        ttk.Label(top, text=self.heading, style="H2.TLabel").pack(side="left")
+        if self.next_key:
+            self.add_next_button(top).pack(side="right")
         if self.blurb:
             ttk.Label(box, text=self.blurb, style="Muted.TLabel",
                       wraplength=880, justify="left").pack(anchor="w", pady=(3, 0))
         return box
+
+    def add_next_button(self, parent):
+        """The way on to the next stage, the same on every screen.
+
+        Enabled once that stage is unlocked -- the app refreshes every one of
+        these whenever something unlocks.
+        """
+        self.next_button = ttk.Button(
+            parent, text=self.next_text,
+            command=lambda: self.app.goto(self.next_key))
+        self.app.refresh_next_buttons(self)
+        return self.next_button
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +79,8 @@ class HardwareStage(Stage):
     key = "hardware"
     label = "1 - Hardware"
     heading = "Hardware report"
+    next_key = "configure"
+    next_text = "Next: Configure  \u2192"
     blurb = ("OpCore-Simplify builds the EFI from a hardware report plus a dump of "
              "this machine's ACPI tables. Generate both with Hardware Sniffer, or "
              "import a Report.json exported earlier.")
@@ -183,6 +205,7 @@ class HardwareStage(Stage):
                 self.banner.show(
                     "Hardware report loaded and ACPI tables read. "
                     "Continue to the macOS version.", "good")
+                self.app.mark_done("hardware")
                 self.app.unlock("macos")
                 self.app.goto("macos")
             else:
@@ -222,6 +245,7 @@ class HardwareStage(Stage):
         if self.app.ocs.hardware_report:
             self.banner.show("ACPI tables loaded. Continue to the macOS version.",
                              "good")
+            self.app.mark_done("hardware")
             self.app.unlock("macos")
         else:
             self.banner.show("ACPI tables loaded. Now import the hardware report.",
@@ -271,7 +295,7 @@ class HardwareStage(Stage):
 
 class MacOSStage(Stage):
     key = "macos"
-    label = "2 - macOS"
+    label = "macOS version"
     heading = "macOS version"
     blurb = ("Every later stage depends on this: kexts, ACPI patches, the SMBIOS "
              "shortlist and the config.plist quirks are all chosen for the "
@@ -308,12 +332,39 @@ class MacOSStage(Stage):
 
         self._options = []
         self._selected = None
+        self._loading = False
 
     def on_enter(self):
         self.ensure_built()
+        # Entered twice in quick succession (Configure and its own tab bar
+        # both announce it), a second load would only meet the "another step
+        # is still running" dialog.
+        if self._options or self._loading:
+            return
+        if self.app.runner.busy:
+            # Something else is still finishing (a report being read, say).
+            # Wait for it rather than meet the "still running" dialog.
+            self.after(300, self._retry_enter)
+            return
         if not self._options:
+            self._loading = True
+
+            def loaded(payload):
+                self._loading = False
+                self._render(payload)
+
+            def failed(exc, detail):
+                self._loading = False
+                self.app.on_error(exc, detail)
+
             self.app.run_stage("Working out supported macOS versions",
-                               self._collect, self._render)
+                               self._collect, loaded, failed,
+                               on_abort=lambda _exc=None: setattr(
+                                   self, "_loading", False))
+
+    def _retry_enter(self):
+        if self.winfo_ismapped():
+            self.on_enter()
 
     def _collect(self):
         suggested = self.app.ocs.suggested_macos_version()
@@ -417,6 +468,8 @@ class MacOSStage(Stage):
                                  "have been selected for it.", "good")
             for key in ("smbios", "acpi", "kexts", "build"):
                 self.app.unlock(key)
+            self.app.mark_done("configure")
+            self.app.refresh_stage("configure")
             self.app.refresh_stage("smbios")
             self.app.refresh_stage("acpi")
             self.app.refresh_stage("kexts")
@@ -431,7 +484,7 @@ class MacOSStage(Stage):
 
 class SmbiosStage(Stage):
     key = "smbios"
-    label = "3 - SMBIOS"
+    label = "SMBIOS model  (review)"
     heading = "SMBIOS model"
     blurb = ("The Mac model this machine reports itself as. OpCore-Simplify picks "
              "one matched to your CPU generation and GPU for power management; "
@@ -519,6 +572,7 @@ class SmbiosStage(Stage):
                 % (name, self._default), "warn")
         else:
             self.banner.hide()
+        self.app.refresh_stage("configure")
         self.app.refresh_stage("kexts")
         self.app.refresh_stage("acpi")
         self.app.refresh_stage("build")
@@ -534,7 +588,7 @@ class SmbiosStage(Stage):
 
 class AcpiStage(Stage):
     key = "acpi"
-    label = "4 - ACPI"
+    label = "ACPI patches  (review)"
     heading = "ACPI patches"
     blurb = ("Selected automatically from your chipset, CPU and disabled devices. "
              "Every patch OpCore-Simplify knows is listed; click a row to toggle "
@@ -586,6 +640,7 @@ class AcpiStage(Stage):
     def _toggle(self, item):
         self.app.ocs.toggle_acpi_patch(int(item))
         self.refresh()
+        self.app.refresh_stage("configure")
 
     def _reset(self):
         def work():
@@ -598,6 +653,7 @@ class AcpiStage(Stage):
 
         self.app.run_stage("Restoring recommended patches", work,
                            lambda _r: (self.refresh(),
+                                       self.app.refresh_stage("configure"),
                                        self.banner.show("Recommended selection "
                                                         "restored.", "good")))
 
@@ -608,7 +664,7 @@ class AcpiStage(Stage):
 
 class KextStage(Stage):
     key = "kexts"
-    label = "5 - Kexts"
+    label = "Kexts  (review)"
     heading = "Kernel extensions"
     blurb = ("Chosen from your devices and the macOS release. Toggling a row uses "
              "OpCore-Simplify's own dependency rules, so selecting a plugin pulls "
@@ -717,19 +773,136 @@ class KextStage(Stage):
                 self.banner.show("  ".join(messages), "warn")
             else:
                 self.banner.hide()
+            self.app.refresh_stage("configure")
             self.app.refresh_stage("build")
 
         self.app.run_stage("Updating kext selection", work, done)
 
 
 # ---------------------------------------------------------------------------
-# 6. Build
+# 2. Configure: the macOS release, and the choices that follow from it
+# ---------------------------------------------------------------------------
+
+class ConfigureStage(Stage):
+    """The macOS release and the three reviews of what it decides.
+
+    Choosing the release is the one decision here; OpCore-Simplify then picks
+    the SMBIOS model, ACPI patches and kexts for it. Those were three stages
+    of their own, which made a review most people never need look like three
+    more steps -- and changing the release reset them with nothing on screen
+    connecting the two. Here they are tabs under the release, with one line
+    saying what was chosen.
+
+    The four screens are the same classes as before and keep their keys, so
+    ``app.goto("kexts")`` still lands on the kext list.
+    """
+
+    key = "configure"
+    label = "2 - Configure"
+    heading = "Configure"
+    blurb = ("Choose the macOS release. OpCore-Simplify then picks the SMBIOS "
+             "model, ACPI patches and kexts for this hardware and that "
+             "release. The other tabs show those choices; reviewing them is "
+             "optional, and the defaults are what the tool recommends.")
+    next_key = "build"
+    next_text = "Next: Build EFI  \u2192"
+
+    SUBSTAGES = (MacOSStage, SmbiosStage, AcpiStage, KextStage)
+
+    def __init__(self, app, parent):
+        super().__init__(app, parent)
+        # Built straight away rather than lazily: the four screens have to
+        # exist as soon as the app does, since everything refers to them.
+        self.header(self)
+        self.summary = ttk.Label(self, text="", style="Muted.TLabel",
+                                 wraplength=1100, justify="left")
+        self.summary.pack(fill="x", padx=18, pady=(0, 8))
+        self.inner = ttk.Notebook(self)
+        self.inner.pack(fill="both", expand=True, padx=12)
+        self.children_stages = {}
+        for cls in self.SUBSTAGES:
+            stage = cls(app, self.inner)
+            self.children_stages[cls.key] = stage
+            self.inner.add(stage, text=cls.label,
+                           state="normal" if cls is MacOSStage else "disabled")
+        self._pending = False
+        self.inner.bind("<<NotebookTabChanged>>", self._inner_changed)
+        self.built = True
+        self.refresh()
+
+    def on_enter(self):
+        self.refresh()
+        # Through the same deferred call as the inner tab bar's own event, so
+        # the screen showing is entered once, not once for each of them.
+        self._inner_changed()
+
+    def on_leave(self):
+        for stage in self.children_stages.values():
+            if hasattr(stage, "on_leave"):
+                stage.on_leave()
+
+    def _inner_changed(self, _event=None):
+        # As with the main notebook: not from inside the widget's own event.
+        if self._pending:
+            return
+        self._pending = True
+        self.after_idle(self._enter_inner)
+
+    def _enter_inner(self):
+        self._pending = False
+        # The inner tab bar announces a selection as soon as it is built, long
+        # before anyone reaches this stage. A screen is entered only while
+        # Configure is the tab actually showing, as when they were stages of
+        # their own.
+        try:
+            if self.app.notebook.select() != str(self):
+                return
+        except Exception:
+            return
+        try:
+            current = self.inner.nametowidget(self.inner.select())
+        except Exception:
+            return
+        current.on_enter()
+
+    def select_inner(self, key):
+        self.inner.select(self.children_stages[key])
+
+    def unlock_inner(self, key):
+        self.inner.tab(self.children_stages[key], state="normal")
+
+    def refresh(self):
+        ocs = self.app.ocs
+        if not ocs.macos_version:
+            self.summary.configure(
+                text="Start with the macOS version: pick one below and press "
+                     "\"Use this version\".")
+            return
+        try:
+            from ocs_scripts.datasets import os_data
+            name = os_data.get_macos_name_by_darwin(ocs.macos_version)
+        except Exception:
+            name = ocs.macos_version
+        patches = ocs.acpi_patches or []
+        self.summary.configure(
+            text="%s   \u00b7   SMBIOS %s   \u00b7   %d of %d ACPI patches   "
+                 "\u00b7   %d kexts   -   chosen for this hardware. Review "
+                 "them in the tabs below, or go on to Build EFI."
+                 % (name, ocs.smbios_model or "-",
+                    sum(1 for p in patches if p.checked), len(patches),
+                    sum(1 for k in (ocs.kexts or []) if k.checked)))
+
+
+# ---------------------------------------------------------------------------
+# 3. Build
 # ---------------------------------------------------------------------------
 
 class BuildStage(Stage):
     key = "build"
-    label = "6 - Build EFI"
+    label = "3 - Build EFI"
     heading = "Build the OpenCore EFI"
+    next_key = "usb"
+    next_text = "Next: Map USB ports  \u2192"
     blurb = ("Downloads OpenCorePkg and the selected kexts, applies the ACPI "
              "patches, generates config.plist and writes the EFI folder.")
 
@@ -809,9 +982,11 @@ class BuildStage(Stage):
             pass
         lines.extend([
             "",
-            "After the build, stages 7 and 8 finish the job:",
-            "  7  map your USB ports and install UTBMap.kext",
-            "  8  run OC Snapshot in the config.plist editor and save",
+            "After the build:",
+            "  4  map your USB ports - installs UTBMap.kext and updates "
+            "config.plist",
+            "  5  edit config.plist, if there is anything to change (optional)",
+            "  6  make the install media and boot the machine from it",
         ])
         self.requirements.configure(state="normal")
         self.requirements.delete("1.0", "end")
@@ -847,12 +1022,13 @@ class BuildStage(Stage):
             self.result_label.configure(text="EFI written to %s" % result)
             self.open_button.pack(side="right", padx=(0, 8))
             self.banner.show(
-                "EFI built. Next: map your USB ports in stage 7 - an unmapped "
+                "EFI built. Next: map your USB ports in stage 4 - an unmapped "
                 "system boots with a generic port map and often loses USB 3 "
                 "speeds, sleep or Bluetooth.", "good")
+            self.app.mark_done("build")
             self.app.unlock("usb")
             self.app.unlock("config")
-            self.app.unlock("finish")
+            self.app.unlock("media")
             self.app.after_build()
 
         def failed(exc, detail):

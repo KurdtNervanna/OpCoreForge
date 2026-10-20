@@ -254,6 +254,20 @@ def main():
     check("and knows how big the recovery is",
           summary["recovery_size"], 5000)
 
+    # "Get macOS and prepare" skips the download it has already done -- but
+    # only for the same board, since another board means another macOS.
+    check("a recovery with no record of its board is not trusted",
+          media.downloaded_board(paths), "")
+    media.board_marker(paths).write_text("Mac-AA95B1DDAB278B95")
+    check("the board a recovery was downloaded for is remembered",
+          media.downloaded_board(paths), "Mac-AA95B1DDAB278B95")
+    base = media.recovery_dir(paths) / "BaseSystem.dmg"
+    kept = base.read_bytes()
+    base.unlink()
+    check("and forgotten once the recovery itself is gone",
+          media.downloaded_board(paths), "")
+    base.write_bytes(kept)
+
     # Re-staging replaces rather than merges, so a stale file cannot survive.
     (staged / "EFI" / "leftover.txt").write_text("old")
     media.stage_media(paths)

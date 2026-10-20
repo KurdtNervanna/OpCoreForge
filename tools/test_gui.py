@@ -50,6 +50,7 @@ def main():
     import tkinter as tk
 
     from opcoreforge import patches, paths as pm
+    from opcoreforge.ui import app as app_module
     from opcoreforge.ui import theme
     from opcoreforge.ui.app import App
 
@@ -140,8 +141,19 @@ def main():
         check("summary populated",
               lambda: app.stages["hardware"].summary._rows.get("CPU").cget("text"),
               lambda v: "i9-10900K" in v)
-        check("macOS stage unlocked",
+        check("the Configure stage is unlocked",
               lambda: app.notebook.tab(1, "state"), "normal")
+        check("and the hardware stage is ticked, having finished",
+              lambda: app.notebook.tab(0, "text"),
+              lambda v: v.startswith(app_module.DONE_MARK))
+        configure = app.stages["configure"]
+        check("Configure holds the four screens as tabs",
+              lambda: [configure.inner.tab(i, "text")
+                       for i in range(configure.inner.index("end"))],
+              lambda v: len(v) == 4 and v[0] == "macOS version")
+        check("the reviews stay locked until a release is applied",
+              lambda: [configure.inner.tab(i, "state") for i in range(1, 4)],
+              ["disabled"] * 3)
         app.goto("macos")
         root.update()
         wait_idle(stage2)
@@ -169,6 +181,20 @@ def main():
     def stage3():
         root.update()
         check("macOS applied", lambda: app.ocs.macos_version, "23.99.99")
+        configure = app.stages["configure"]
+        check("applying it opens the reviews",
+              lambda: [configure.inner.tab(i, "state") for i in range(1, 4)],
+              ["normal"] * 3)
+        check("and says in one line what was chosen",
+              lambda: configure.summary.cget("text"),
+              lambda v: "SMBIOS" in v and "kexts" in v)
+        check("Configure is ticked; nothing past it is",
+              lambda: [app.notebook.tab(i, "text").startswith(
+                  app_module.DONE_MARK) for i in range(len(app.stage_order))],
+              [True, True, False, False, False, False])
+        check("its Next button now leads to the build",
+              lambda: "disabled" in configure.next_button.state(), False)
+        check("configure rendered", lambda: shot("03b-configure"), True)
         check("smbios chosen", lambda: app.ocs.smbios_model,
               lambda v: bool(v))
         app.goto("smbios")
@@ -235,9 +261,13 @@ def main():
         check("EFI exists after GUI build",
               lambda: (P.oc_dir / "OpenCore.efi").exists(), True)
         check("build result rendered", lambda: shot("09-build-done"), True)
-        check("usb + config unlocked",
-              lambda: (app.notebook.tab(6, "state"), app.notebook.tab(7, "state")),
-              ("normal", "normal"))
+        check("usb, config and media unlocked",
+              lambda: tuple(app.notebook.tab(i, "state") for i in (3, 4, 5)),
+              ("normal", "normal", "normal"))
+        check("but not ticked - none of them has been done yet",
+              lambda: [app.notebook.tab(i, "text").startswith(
+                  app_module.DONE_MARK) for i in (3, 4, 5)],
+              [False, False, False])
 
         app.goto("usb")
         root.update()
@@ -338,16 +368,9 @@ def main():
         check("snapshot + save from toolbar",
               lambda: shot("13-config-snapshot"), True)
 
-        app.goto("finish")
-        root.update()
-        check("finish rendered", lambda: shot("14-finish"), True)
-        check("finish lists usb map state",
-              lambda: app.stages["finish"].summary._rows["USB map"].cget("text"),
-              lambda v: "UTBMap" in v)
-
-        # -- stage 10: install media ------------------------------------
-        check("install media unlocked by saving config.plist",
-              lambda: app.notebook.tab(9, "state"), "normal")
+        # -- stage 6: install media, with what used to be "Finish" --------
+        check("install media was unlocked by the build, not by saving",
+              lambda: app.notebook.tab(5, "state"), "normal")
         app.goto("media")
         root.update()
         wait_idle(lambda: None)
@@ -355,10 +378,15 @@ def main():
         media = app.stages["media"]
         check("install media stage rendered",
               lambda: shot("20-install-media"), True)
+        check("its checklist lists the usb map state",
+              lambda: media.checklist.summary._rows["USB map"].cget("text"),
+              lambda v: "UTBMap" in v)
         check("it says what it actually makes",
               lambda: "Recovery" in str(media.blurb) or True, True)
-        check("preparing the folder is refused until there is a recovery",
-              lambda: "disabled" in media.stage_button.state(), True)
+        check("one button gets macOS and prepares the media",
+              lambda: (media.prepare_button.cget("text"),
+                       "disabled" in media.prepare_button.state()),
+              ("Get macOS and prepare", False))
         check("the ISO is refused until the media is prepared",
               lambda: "disabled" in media.iso_button.state(), True)
         # The dropdown lists Macs whose board can be asked for the release

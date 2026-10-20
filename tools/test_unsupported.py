@@ -144,6 +144,15 @@ def main():
               lambda: "without a supported GPU" in (aborted.screen or ""), True)
         check("explanation names the GPU",
               lambda: "GTX 1660 Ti" in (aborted.screen or ""), True)
+        # Upstream's stop text is silenced for NullMoth-capable cards, so the
+        # reason has to come from OpCoreForge: plain, naming the card, and
+        # attached to the exception for the UI to lead with.
+        check("abort has a plain reason for the UI",
+              lambda: getattr(aborted, "explanation", ""),
+              lambda v: "no driver for NVIDIA GeForce GTX 1660 Ti" in v
+                        and "without a supported GPU" in v)
+        check("no upstream scare text",
+              lambda: "spam" not in (aborted.screen or ""), True)
 
         # 2. the same thing through the UI must surface, not vanish
         app.ocs.hardware_report = None
@@ -161,6 +170,10 @@ def main():
                    if isinstance(w, MessageDialog)]
         check("stop is reported with a dialog", lambda: len(dialogs), 1)
         if dialogs:
+            check("dialog leads with the reason",
+                  lambda: dialogs[0].winfo_children()[0].winfo_children()[1]
+                          .cget("text"),
+                  lambda v: "no driver for NVIDIA GeForce GTX 1660 Ti" in v)
             check("dialog shows the reason",
                   lambda: dialogs[0].winfo_children()[0].winfo_children()[2]
                           .winfo_children()[0].get("1.0", "end"),
@@ -173,7 +186,7 @@ def main():
               lambda: app.status_label.cget("text"), "Stopped")
         check("banner is shown in red",
               lambda: hardware.banner.label.cget("text"),
-              lambda v: "stopped" in v.lower() and len(v) > 20)
+              lambda v: "stopped" in v.lower() and "GTX 1660 Ti" in v)
         check("reason is on screen, not just in the log",
               lambda: hardware.report_text.get("1.0", "end"),
               lambda v: "without a supported GPU" in v)

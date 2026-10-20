@@ -72,12 +72,18 @@ class WorkflowAborted(Exception):
     exit. The waiting-for-Enter step is what a terminal user reads the message
     during; in a GUI there is nothing to read unless the reason travels with
     the exception, so it does.
+
+    ``explanation`` is one plain sentence saying why, when OpCoreForge itself
+    knows it (the NVIDIA check in ``patches.py`` does). The UI leads with it,
+    since the screen is a whole compatibility listing with the reason at the
+    bottom.
     """
 
-    def __init__(self, message="", screen="", fatal=False):
+    def __init__(self, message="", screen="", fatal=False, explanation=""):
         super().__init__(message)
         self.reason = message
         self.screen = screen
+        self.explanation = explanation
         #: True when OpCore-Simplify stopped itself, rather than the user
         #: cancelling a prompt or the app shutting down.
         self.fatal = fatal
@@ -344,14 +350,15 @@ class ConsoleBridge:
         except Exception:
             pass
 
-    def exit_program(self):
+    def exit_program(self, explanation=""):
         """Upstream calls ``sys.exit(0)`` here; unwind the worker instead.
 
         The screen goes with it so the UI can show *why* it stopped -- the
         preceding lines are the whole explanation.
         """
         raise WorkflowAborted("OpCore-Simplify stopped",
-                              screen=self.current_screen(), fatal=True)
+                              screen=self.current_screen(), fatal=True,
+                              explanation=explanation)
 
     def request_input(self, prompt: str = "Press Enter to continue...") -> str:
         if self._aborting:
@@ -409,7 +416,7 @@ def install(bridge: ConsoleBridge, utils_module) -> None:
     cls.request_input = lambda self, prompt="Press Enter to continue...": bridge.request_input(prompt)
     cls.progress_bar = lambda self, title, steps, i, done=False: bridge.progress_bar(title, steps, i, done)
     cls.adjust_window_size = lambda self, content="": bridge.adjust_window_size(content)
-    cls.exit_program = lambda self: bridge.exit_program()
+    cls.exit_program = lambda self, explanation="": bridge.exit_program(explanation)
     cls.open_folder = lambda self, folder_path: bridge.open_folder(folder_path)
 
     sys.stdout = _StdoutProxy(bridge, bridge._stdout)

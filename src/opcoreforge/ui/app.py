@@ -688,10 +688,12 @@ class App:
     def show_stopped(self, exc):
         """Explain a self-inflicted stop from OpCore-Simplify."""
         screen = getattr(exc, "screen", "") or ""
+        explanation = getattr(exc, "explanation", "")
         prompt_ui.show_message(
             self.root, "OpCore-Simplify stopped", screen,
-            headline="This configuration cannot go any further. The tool's own "
-                     "explanation is below.",
+            headline=(explanation + " The full check is below.") if explanation
+            else "This configuration cannot go any further. The tool's own "
+                 "explanation is below.",
             kind="bad")
 
     def on_error(self, exc, detail):

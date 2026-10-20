@@ -123,9 +123,11 @@ def patch_compatibility_checker() -> None:
     and on "yes" reclassify the card as Sequoia-capable before the flow gives
     up.
 
-    Declining -- or a machine that already has a supported GPU, so upstream
-    never stops -- preserves upstream's behaviour exactly, including the visible
-    stop its own regression test checks for.
+    A machine that already has a supported GPU, so upstream never stops, keeps
+    upstream's behaviour. Declining still stops, but with a plain reason naming
+    the card in place of upstream's text (which is silenced to make the offer),
+    passed to ``exit_program`` so the GUI can lead with it; see
+    tools/test_unsupported.py.
 
     Done here rather than in ``src/vendor`` so re-vendoring a newer upstream
     cannot silently drop it (see the module docstring).
@@ -181,6 +183,28 @@ def patch_compatibility_checker() -> None:
                     " " * 6, "s" if len(monitors) > 1 else "",
                     ", ".join(monitors)))
 
+    def _stop_reason(report, declined) -> str:
+        names = list(report.get("GPU", {}))
+        listed = (", ".join(names[:-1]) + " or " + names[-1]
+                  if len(names) > 1 else "".join(names) or "this graphics card")
+        reason = ("macOS has no driver for {}, and macOS cannot be installed "
+                  "without a supported GPU.".format(listed))
+        if declined:
+            reason += (" The NullMoth NVIDIA driver was declined, so there is "
+                       "nothing to build.")
+        return reason
+
+    def _exit_with(utils, reason):
+        """``exit_program`` with the reason attached for the GUI to lead with.
+
+        Only OpCoreForge's console bridge takes the argument; upstream's own
+        ``exit_program`` (no bridge installed) does not.
+        """
+        try:
+            utils.exit_program(explanation=reason)
+        except TypeError:
+            utils.exit_program()
+
     def check_gpu_compatibility(self):
         nvidia.reset()
         if not nvidia.find_candidates(self.hardware_report):
@@ -221,16 +245,14 @@ def patch_compatibility_checker() -> None:
             return None
 
         if not candidates or not _offer(self, candidates):
+            # Upstream's own stop text was silenced above, so say why in plain
+            # words -- naming the card -- or the user gets a stop with no reason.
             _print_listing(self, set())
+            reason = _stop_reason(self.hardware_report, bool(candidates))
             print("")
-            if candidates:
-                names = ", ".join(name for name, _ in candidates)
-                print("The NullMoth NVIDIA driver was declined for {}.".format(
-                    names))
-            print("No GPU here can run macOS as configured, so there is nothing "
-                  "to build.")
+            print(reason)
             self.utils.request_input()
-            self.utils.exit_program()
+            _exit_with(self.utils, reason)
             return None
 
         nvidia.set_engaged(True)

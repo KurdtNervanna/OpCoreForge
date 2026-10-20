@@ -96,7 +96,7 @@ def _media_note(folder: Path) -> str:
 def find_sources(volumes=Path("/Volumes")) -> list:
     """EFI folders on mounted drives, the as-built one first.
 
-    An install stick made by OpCoreForge 1.4 or later carries the EFI twice:
+    An install stick made by OpCoreForge 2.0 or later carries the EFI twice:
     at its root, tuned for installing (recovery shown in the picker, a long
     timeout), and under ``OpCoreForge/EFI`` exactly as it was built. The second
     is the one meant for the internal disk. Older sticks only have the first,

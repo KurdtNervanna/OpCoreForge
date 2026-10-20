@@ -4,7 +4,9 @@ Every delivered build gets its own version, so you can always tell which one
 you are running: it is in the title bar, in `OpCoreForge.exe --version`, at the
 top of `--self-test`, and in the release zip's filename.
 
-## 1.4.0 - 2026-10-20
+## 2.0.0 - 2026-10-20
+
+- A major version: OpCoreForge is now two apps, the Windows one that builds the EFI and the install media, and a macOS companion for the machine once macOS is on it.
 
 - OpCoreForge Companion, a macOS app for the target machine once macOS is installed. It installs OpenCore onto the internal disk's EFI partition so the USB stick is no longer needed to boot: it finds the EFI on the install stick, checks it with the same audit stage 9 uses, sets LauncherOption to Full so OpenCore adds itself to the firmware boot menu, backs up the whole EFI folder, and replaces only EFI/OC and EFI/BOOT - EFI/Microsoft and anything else on the partition is left alone, and a failed copy puts the previous OpenCore back. One administrator password prompt; the script that runs as root is built by a pure function and tools/test_companion.py runs it against stand-in partitions. It can also copy itself into Applications. Built on a Mac by GitHub Actions (.github/workflows/companion.yml) and attached to each published release as OpCoreForge-Companion.dmg
 - Stage 10 puts the companion on the install media: an OpCoreForge folder with the disk image, the EFI exactly as built (the copy at the root of the stick has the install settings, which are wrong for an installed system), media.json and a READ ME. The image is downloaded from the release for this version, then the latest, and cached in OpCoreForge_Data/Companion; a .dmg placed there by hand is used as is. Without it the media is still made, and the READ ME says where to get the app

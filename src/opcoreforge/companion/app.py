@@ -267,7 +267,7 @@ class CompanionApp:
         if source.kind == "media":
             extra = ("\n\nThis is the install stick's own EFI, which shows "
                      "macOS Recovery in the picker and waits 15 seconds. It "
-                     "boots fine; an EFI built by OpCoreForge 1.4 or later "
+                     "boots fine; an EFI built by OpCoreForge 2.0 or later "
                      "also carries the as-built copy, which is the better "
                      "choice.")
         if not messagebox.askyesno(

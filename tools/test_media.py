@@ -476,6 +476,53 @@ def main():
               "Nothing has been changed" in refused.hint, True)
     check("and diskpart was never invoked", ran, [])
 
+    # -- diskpart refused by a drive that is briefly in use ------------------
+    class Done:
+        def __init__(self, code, out):
+            self.returncode, self.stdout, self.stderr = code, out, ""
+
+    denied = Done(2, "Disk 3 is now the selected disk.\n\n"
+                     "DiskPart has encountered an error: Access is denied.")
+
+    def scripted(*outcomes):
+        calls = []
+
+        def run(args, **_kw):
+            calls.append(args)
+            return outcomes[min(len(calls), len(outcomes)) - 1]
+        return run, calls
+
+    pauses = []
+    run, calls = scripted(denied, Done(0, "DiskPart successfully cleaned"))
+    check("access denied is retried, and the retry can succeed",
+          usbwriter._run_diskpart("select disk 3", run=run,
+                                  sleep=pauses.append),
+          "DiskPart successfully cleaned")
+    check("with a pause before the retry", len(pauses), 1)
+
+    run, calls = scripted(denied)
+    try:
+        usbwriter._run_diskpart("select disk 3", run=run, sleep=lambda _s: None)
+        RESULTS.append(("FAIL", "access denied every time is reported",
+                        "no exception"))
+    except usbwriter.UnsafeTarget as refused:
+        check("access denied every time is reported in plain words",
+              "has the drive open" in refused.hint
+              and "Nothing was written" in refused.hint, True)
+        check("and still shows what diskpart said",
+              "Access is denied" in refused.hint, True)
+    check("it gives up after a fixed number of tries", len(calls),
+          usbwriter.DISKPART_ATTEMPTS)
+
+    run, calls = scripted(Done(2, "Virtual Disk Service error: "
+                                  "The media is write protected."))
+    try:
+        usbwriter._run_diskpart("select disk 3", run=run, sleep=lambda _s: None)
+    except usbwriter.UnsafeTarget as refused:
+        check("other diskpart errors are not retried", len(calls), 1)
+        check("and pass diskpart's words through",
+              "write protected" in refused.hint, True)
+
     check("the label a user confirms names the disk and its size",
           good.label(), "Disk 2 - SanDisk Ultra USB - 32.0 GB (E:)")
 

@@ -402,20 +402,48 @@ def _flush(letter: str) -> bool:
         return False
 
 
-def _run_diskpart(script: str) -> str:
+#: How often diskpart is tried when Windows says "Access is denied", and the
+#: pause between tries.
+DISKPART_ATTEMPTS = 3
+DISKPART_RETRY_PAUSE = 3.0
+
+
+def _run_diskpart(script: str, run=subprocess.run, sleep=time.sleep) -> str:
+    """Run *script* through diskpart, retrying a refused ``clean``.
+
+    "Access is denied" from ``clean`` -- with admin rights -- means something
+    has the drive open. Just after a card or stick goes in, Explorer's AutoPlay
+    or an antivirus scan often still does, and the same script works a few
+    seconds later (a real report: the manual retry 4 s on went straight
+    through). So that case is retried before it is reported. The script starts
+    from ``clean``, so running it again from the top is safe.
+    """
     import tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False,
                                      encoding="ascii") as handle:
         handle.write(script)
         path = handle.name
     try:
-        done = subprocess.run(["diskpart", "/s", path],
-                              capture_output=True, text=True, timeout=600)
-        if done.returncode != 0:
-            raise UnsafeTarget(
-                "diskpart could not prepare the drive.",
-                "%s\n\n%s" % (done.stdout.strip(), done.stderr.strip()))
-        return done.stdout
+        for attempt in range(1, DISKPART_ATTEMPTS + 1):
+            done = run(["diskpart", "/s", path],
+                       capture_output=True, text=True, timeout=600)
+            if done.returncode == 0:
+                return done.stdout
+            output = "%s\n\n%s" % ((done.stdout or "").strip(),
+                                    (done.stderr or "").strip())
+            denied = "access is denied" in output.lower()
+            if not denied:
+                raise UnsafeTarget("diskpart could not prepare the drive.",
+                                   output.strip())
+            if attempt < DISKPART_ATTEMPTS:
+                sleep(DISKPART_RETRY_PAUSE)
+        raise UnsafeTarget(
+            "Windows would not let diskpart erase the drive.",
+            "diskpart said \"Access is denied\" %d times in a row. Nothing was "
+            "written. Something has the drive open: close any File Explorer "
+            "window showing it and any program using it, let an antivirus "
+            "scan of it finish, or unplug it and plug it back in, then try "
+            "again.\n\ndiskpart said:\n%s" % (DISKPART_ATTEMPTS, output.strip()))
     finally:
         try:
             os.unlink(path)

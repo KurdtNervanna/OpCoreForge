@@ -4,6 +4,10 @@ Every delivered build gets its own version, so you can always tell which one
 you are running: it is in the title bar, in `OpCoreForge.exe --version`, at the
 top of `--self-test`, and in the release zip's filename.
 
+## 2.1.3 - 2026-10-20
+
+- Check the two downloads stage 6 makes against their published SHA-256. The OpenCorePkg zip that macrecovery comes from is checked against the hash Dortania's build index lists for it (or the one GitHub's release page shows, when the index cannot be read), and the companion disk image against the digest GitHub's releases API gives for the release file. A mismatch is retried and then refused, so a corrupt or substituted file is never used; the error says so. A release the API lists without the image is skipped instead of trying a URL that can only 404, and only when the API cannot be reached at all is the image downloaded unchecked, as before, with the log saying it is not verified. tools/test_media.py and tools/test_companion.py cover both
+
 ## 2.1.2 - 2026-10-20
 
 - Retry diskpart when Windows says 'Access is denied', and explain it when it keeps saying so. Just after a card or stick is plugged in, Explorer's AutoPlay or an antivirus scan can still have it open, and diskpart's clean then fails with 'Access is denied' even with admin rights; a real report's manual retry four seconds later went straight through. The USB writer now waits three seconds and runs the same script again, up to three tries, and only then stops - with a plain explanation (nothing was written; close what has the drive open, or replug it) above diskpart's own output instead of the raw output alone. Other diskpart errors are reported at once as before. tools/test_media.py covers both

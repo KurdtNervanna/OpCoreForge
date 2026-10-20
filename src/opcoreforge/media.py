@@ -79,8 +79,13 @@ DORTANIA_BUILDS = ("https://raw.githubusercontent.com/dortania/build-repo/"
                    "builds/latest.json")
 
 
-def _opencorepkg_url(github, fetcher):
-    """The OpenCorePkg RELEASE zip, from the build index first.
+def _opencorepkg_release(github, fetcher):
+    """``(url, sha256)`` of the OpenCorePkg RELEASE zip, build index first.
+
+    Both sources publish the zip's SHA-256 -- the build index under
+    ``hashes``, the release page beside each asset -- and the download is
+    checked against it. ``sha256`` is None only when neither says, and
+    ``(None, None)`` means no RELEASE zip was found at all.
 
     The build stage already downloads OpenCorePkg through Dortania's build index, so
     that path is known to work on a machine that has got this far. The GitHub
@@ -92,21 +97,27 @@ def _opencorepkg_url(github, fetcher):
     """
     try:
         index = fetcher.fetch_and_parse_content(DORTANIA_BUILDS, "json") or {}
-        url = index["OpenCorePkg"]["versions"][0]["links"]["release"]
+        latest = index["OpenCorePkg"]["versions"][0]
+        url = latest["links"]["release"]
         if url:
-            return url
+            sha256 = None
+            try:
+                sha256 = latest["hashes"]["release"]["sha256"] or None
+            except (KeyError, TypeError):
+                pass
+            return url, sha256
     except Exception:
         pass
     try:
         release = github.get_latest_release("acidanthera", "OpenCorePkg") or {}
     except Exception:
-        return None
+        return None, None
     for asset in release.get("assets") or []:
         url = asset.get("url") or asset.get("browser_download_url") or ""
         name = (asset.get("product_name") or "") + " " + url
         if url.lower().endswith(".zip") and "release" in name.lower():
-            return url
-    return None
+            return url, asset.get("sha256") or None
+    return None, None
 
 
 def ensure_macrecovery(paths, fetcher=None, github=None, report=None) -> Path:
@@ -131,7 +142,7 @@ def ensure_macrecovery(paths, fetcher=None, github=None, report=None) -> Path:
         fetcher = fetcher or resource_fetcher.ResourceFetcher()
 
     say("Looking up the OpenCorePkg release...")
-    url = _opencorepkg_url(github, fetcher)
+    url, sha256 = _opencorepkg_release(github, fetcher)
     if not url:
         raise MediaError(
             "The OpenCorePkg release does not list a RELEASE zip.",
@@ -142,13 +153,17 @@ def ensure_macrecovery(paths, fetcher=None, github=None, report=None) -> Path:
     target.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as scratch:
         archive = Path(scratch) / "OpenCorePkg.zip"
-        say("Downloading OpenCorePkg for macrecovery...")
-        fetcher.download_and_save_file(url, str(archive))
-        if not archive.exists():
+        say("Downloading OpenCorePkg for macrecovery%s..." % (
+            " (checked against its published SHA-256)" if sha256 else ""))
+        ok = fetcher.download_and_save_file(url, str(archive), sha256)
+        if not ok or not archive.exists():
             raise MediaError(
                 "OpenCorePkg could not be downloaded.",
                 "The recovery download needs macrecovery.py from that "
-                "archive. Check the connection and try again.")
+                "archive. Check the connection and try again."
+                + (" If it keeps failing, the file did not match the "
+                   "SHA-256 published for it and was discarded."
+                   if sha256 else ""))
         extracted = 0
         with zipfile.ZipFile(archive) as zipped:
             for member in zipped.namelist():

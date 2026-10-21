@@ -540,6 +540,10 @@ Then it:
    from `CHANGELOG.md` by `build/release_notes.py` and cover every version
    since the last published release, not just the newest.
 
+Untick **publish** for a dry run: both files are built, self-tested and
+handed to the publish job, and no release is made. Run it on a branch to try
+a change to the workflows before it reaches a real release.
+
 ## Keeping up with upstream
 
 ```
